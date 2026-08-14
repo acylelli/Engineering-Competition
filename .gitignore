@@ -1,0 +1,34 @@
+# Android / Gradle
+.gradle/
+build/
+**/build/
+local.properties
+*.apk
+*.aab
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# Kotlin / Java
+out/
+*.class
+
+# Spring / logs
+logs/
+*.log
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+application-local.yml
+google-services.json
+service-account*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local design-agent state
+figma-watch-safety-state.json
