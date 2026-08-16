@@ -26,6 +26,18 @@ import androidx.core.content.ContextCompat
 import com.example.watchsafety.location.WatchLocationManager
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
+import androidx.wear.compose.material.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun TmapRouteTestScreen() {
@@ -171,7 +183,7 @@ fun TmapRouteTestScreen() {
             true
 
         statusText =
-            "한성대학교까지 경로 검색 중..."
+            "집까지 경로 검색 중..."
 
         try {
 
@@ -183,7 +195,9 @@ fun TmapRouteTestScreen() {
                             location.longitude,
 
                         startLatitude =
-                            location.latitude
+                            location.latitude,
+                        endLongitude = 126.7722,
+                        endLatitude = 37.6833
                     )
 
             statusText =
@@ -222,264 +236,101 @@ fun TmapRouteTestScreen() {
             fontSize = 12.sp
         )
 
+    // 여기서부터 복사해서 기존 화면 코드와 교체하세요!
     Column(
-
-        modifier =
-            Modifier.fillMaxSize(),
-
-        horizontalAlignment =
-            Alignment.CenterHorizontally,
-
-        verticalArrangement =
-            Arrangement.Center
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1E1E1E)) // 깔끔한 다크 배경
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
+        val route = routeResult
 
-        BasicText(
-            text =
-                "한성대학교 길찾기",
-            style =
-                titleStyle
-        )
-
-        BasicText(
-            text =
-                statusText,
-            style =
-                textStyle
-        )
-
-        val location =
-            currentLocation
-
-        if (
-            location != null
-        ) {
-
+        if (route == null) {
+            // 경로를 불러오기 전 로딩 화면
             BasicText(
-                text =
-                    "현재 위치",
-                style =
-                    textStyle
+                text = statusText,
+                style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            )
+        } else {
+            // 남은 거리와 시간 강조
+            // 🚨 1. 실시간 GPS 위치로 목적지까지의 거리를 직접 계산합니다!
+            val realTimeDistance = currentLocation?.let { current ->
+                val results = FloatArray(1)
+                android.location.Location.distanceBetween(
+                    current.latitude,
+                    current.longitude,
+                    37.6833,  // 신일초등학교 위도
+                    126.7722, // 신일초등학교 경도
+                    results
+                )
+                results[0].toInt()
+            } ?: route.totalDistanceMeters
+
+            // 🚨 2. 실시간으로 줄어드는 거리를 화면에 띄웁니다!
+            BasicText(
+                text = "${realTimeDistance}m 남음",
+                style = TextStyle(color = Color(0xFF4CAF50), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            )
+            BasicText(
+                text = "예상 소요시간: ${route.totalTimeSeconds / 60}분",
+                style = TextStyle(color = Color.LightGray, fontSize = 12.sp)
             )
 
-            BasicText(
-                text =
-                    "위도: %.5f"
-                        .format(
-                            location.latitude
-                        ),
-                style =
-                    textStyle
-            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-            BasicText(
-                text =
-                    "경도: %.5f"
-                        .format(
-                            location.longitude
-                        ),
-                style =
-                    textStyle
-            )
+            // 첫 번째 안내 지점 찾기 (turnType 200: 출발점 제외)
+            val firstGuide = route.steps.firstOrNull { it.turnType != 200 }
 
-            BasicText(
-                text =
-                    "GPS 정확도: %.0fm"
-                        .format(
-                            location
-                                .accuracyMeters
-                        ),
-                style =
-                    textStyle
-            )
-        }
+            if (firstGuide != null) {
+                // TMAP 방향 코드(turnType)에 따라 화살표 각도 계산
+                val rotationDegree = when (firstGuide.turnType) {
+                    11 -> 0f      // 직진
+                    12 -> -90f    // 좌회전
+                    13 -> 90f     // 우회전
+                    14 -> 180f    // 유턴
+                    16, 17, 214, 215 -> -45f // 약간 왼쪽 (11시 방향)
+                    18, 19, 216, 217 -> 45f  // 약간 오른쪽 (1시 방향)
+                    else -> 0f    // 기본 직진
+                }
 
-        val route =
-            routeResult
-
-        if (
-            route != null
-        ) {
-
-            BasicText(
-                text = "",
-                style =
-                    textStyle
-            )
-
-            BasicText(
-                text =
-                    "총 거리: " +
-                            formatDistance(
-                                route
-                                    .totalDistanceMeters
-                            ),
-                style =
-                    textStyle
-            )
-
-            BasicText(
-                text =
-                    "예상 시간: " +
-                            formatTime(
-                                route
-                                    .totalTimeSeconds
-                            ),
-                style =
-                    textStyle
-            )
-
-            BasicText(
-                text =
-                    "안내 지점: " +
-                            route.steps.size +
-                            "개",
-                style =
-                    textStyle
-            )
-
-            /*
-             * turnType 200은 출발점이라 제외
-             */
-            val firstGuide =
-                route.steps
-                    .firstOrNull {
-
-                        it.turnType != 200
-                    }
-
-            if (
-                firstGuide != null
-            ) {
-
-                BasicText(
-                    text = "",
-                    style =
-                        textStyle
+                // 휙휙 돌아가는 큼지막한 노란색 화살표
+                Icon(
+                    imageVector = Icons.Default.ArrowUpward,
+                    contentDescription = "방향 화살표",
+                    tint = Color(0xFFFFEB3B),
+                    modifier = Modifier
+                        .size(60.dp)
+                        .rotate(rotationDegree)
                 )
 
-                BasicText(
-                    text =
-                        "첫 안내",
-                    style =
-                        textStyle
-                )
+                Spacer(modifier = Modifier.height(12.dp))
 
+                // 안내 메시지 (예: "50m 앞 우회전")
                 BasicText(
-                    text =
-                        turnTypeToText(
-                            firstGuide.turnType
-                        ),
-                    style =
-                        titleStyle
+                    text = firstGuide.description,
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
                 )
-
+            } else {
+                // 안내가 끝났을 때
+                Icon(
+                    imageVector = Icons.Default.ArrowUpward,
+                    contentDescription = "도착",
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(60.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 BasicText(
-                    text =
-                        firstGuide.description,
-                    style =
-                        textStyle
+                    text = "목적지 부근입니다",
+                    style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 )
             }
         }
-    }
-}
-
-private fun formatDistance(
-    meters: Int
-): String {
-
-    return if (
-        meters >= 1000
-    ) {
-
-        "%.1f km".format(
-            meters / 1000.0
-        )
-
-    } else {
-
-        "${meters}m"
-    }
-}
-
-private fun formatTime(
-    seconds: Int
-): String {
-
-    val minutes =
-        seconds / 60
-
-    return "${minutes}분"
-}
-
-private fun turnTypeToText(
-    turnType: Int
-): String {
-
-    return when (
-        turnType
-    ) {
-
-        11 ->
-            "↑ 직진"
-
-        12 ->
-            "← 좌회전"
-
-        13 ->
-            "→ 우회전"
-
-        14 ->
-            "↶ 유턴"
-
-        16,
-        17 ->
-            "↙ 왼쪽 방향"
-
-        18,
-        19 ->
-            "↗ 오른쪽 방향"
-
-        125 ->
-            "육교"
-
-        126 ->
-            "지하보도"
-
-        127 ->
-            "계단"
-
-        128 ->
-            "경사로"
-
-        129 ->
-            "계단 또는 경사로"
-
-        211 ->
-            "횡단보도"
-
-        212 ->
-            "← 좌측 횡단보도"
-
-        213 ->
-            "→ 우측 횡단보도"
-
-        214,
-        215 ->
-            "↙ 왼쪽 횡단보도"
-
-        216,
-        217 ->
-            "↗ 오른쪽 횡단보도"
-
-        218 ->
-            "엘리베이터"
-
-        201 ->
-            "🏠 목적지 도착"
-
-        else ->
-            "경로 안내"
     }
 }

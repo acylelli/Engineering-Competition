@@ -12,7 +12,9 @@ class TmapRouteClient {
 
     suspend fun getPedestrianRoute(
         startLongitude: Double,
-        startLatitude: Double
+        startLatitude: Double,
+        endLongitude: Double,
+        endLatitude: Double
     ): TmapRouteResult {
 
         return withContext(
@@ -77,7 +79,13 @@ class TmapRouteClient {
                             startLongitude,
 
                         startLatitude =
-                            startLatitude
+                            startLatitude,
+
+                        endLongitude =
+                            endLongitude,
+
+                        endLatitude =
+                            endLatitude
                     )
 
                 connection
@@ -145,7 +153,9 @@ class TmapRouteClient {
 
     private fun createRequestBody(
         startLongitude: Double,
-        startLatitude: Double
+        startLatitude: Double,
+        endLongitude: Double,
+        endLatitude: Double
     ): JSONObject {
 
         return JSONObject().apply {
@@ -169,12 +179,12 @@ class TmapRouteClient {
 
             put(
                 "endX",
-                HansungDestination.LONGITUDE
+                endLongitude
             )
 
             put(
                 "endY",
-                HansungDestination.LATITUDE
+                endLatitude
             )
 
             put(
@@ -187,7 +197,7 @@ class TmapRouteClient {
             put(
                 "endName",
                 encodeName(
-                    HansungDestination.NAME
+                    "집"
                 )
             )
 
