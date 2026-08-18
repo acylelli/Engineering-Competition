@@ -1,6 +1,6 @@
 # Backend
 
-Watch Safety의 Spring Boot API, MySQL 저장소, FCM 알림 계층입니다.
+Watch Safety의 1차 백엔드는 Supabase로 구성합니다. PostgreSQL, Auth, Row Level Security(RLS), Realtime을 보호자 앱과 연결하며, FCM 푸시는 후속 단계에서 별도로 추가합니다.
 
 ## 주요 도메인
 
@@ -11,13 +11,20 @@ Watch Safety의 Spring Boot API, MySQL 저장소, FCM 알림 계층입니다.
 - ReturnHomeRequest
 - DeviceStatus
 
-## 초기 구현 순서
+## 현재 구현
 
-1. Spring Boot 프로젝트와 환경별 설정
-2. 사용자·보호자·디바이스 연결 모델
-3. 수동 SOS와 최신 위치 API
-4. FCM Push 전달
-5. 안전 이벤트 목록
-6. 안전구역과 귀가 요청
+- 서울 리전 Supabase 프로젝트 생성
+- 보호자·사용자·워치·위치·안전구역·안전 이벤트·귀가 요청·알림 설정 테이블
+- 보호자별 데이터 격리를 위한 RLS 정책
+- 위치, 워치 상태, 안전구역, 이벤트, 귀가 요청, 알림 설정 Realtime 발행
+- 앱 첫 실행용 데모 데이터 생성 함수
+- 스키마 원본: [`supabase/schema.sql`](supabase/schema.sql)
+
+## 후속 작업
+
+1. 임시 익명 로그인을 실제 이메일/소셜 로그인으로 교체
+2. Wear OS 앱과 사용자·워치 페어링 규칙 확정
+3. FCM 긴급 푸시와 서버 측 이벤트 처리
+4. 실제 위치 수집·안전구역 판정 로직 연결
 
 비밀 값과 서비스 계정 파일은 저장소에 커밋하지 않습니다.

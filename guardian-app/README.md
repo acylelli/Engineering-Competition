@@ -59,12 +59,23 @@
 - 위치·워치 상태 새로고침 Mock 동작
 - Repository 상태 변경 단위 테스트
 
+### 완료: 5단계 Supabase 데이터 연결
+
+- Supabase Auth 익명 세션 기반 보호자 식별
+- PostgreSQL 테이블과 `SupabaseGuardianRepository` 연결
+- 홈, 워치 상태, 최근 위치, 안전구역, 이벤트, 귀가 요청, 알림 설정 조회
+- 안전구역 추가·활성화, 귀가 요청, 알림 설정 변경 저장
+- RLS로 보호자별 데이터 격리
+- 위치·워치·안전 이벤트 등 Realtime 변경 수신
+- 첫 로그인 시 화면 확인용 데모 데이터 자동 생성
+- Supabase 설정이 없으면 기존 Mock Repository로 자동 대체
+
 ### 다음 연동 순서
 
 1. 실제 지도 SDK 연결
-2. 서버 API와 ViewModel 연결
+2. 익명 로그인을 실제 사용자 로그인으로 교체
 3. FCM 긴급 알림 연결
-4. 워치 위치·배터리·안전 이벤트 실데이터 연결
+4. 워치 위치·배터리·안전 이벤트 실데이터 쓰기 연결
 
 ## 현재 초기 설정
 
@@ -76,8 +87,17 @@
 
 Android Studio에서 `guardian-app` 폴더를 프로젝트로 엽니다. SDK는 Android Studio에 설치된 Android SDK를 사용하고, Gradle JDK는 `Embedded JDK`로 설정합니다.
 
+Supabase를 사용하려면 프로젝트의 `guardian-app/local.properties`에 다음 값을 추가합니다. Publishable key는 앱에 넣어도 되는 공개 식별 키이며, `service_role` 키는 절대 앱에 넣지 않습니다.
+
+```properties
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
+```
+
+Supabase Dashboard의 **Authentication > Providers > Anonymous Sign-Ins**도 활성화해야 합니다. 활성화하지 않거나 설정값을 비워 두면 앱은 기존 Mock 데이터 화면을 유지합니다.
+
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-Firebase와 지도 SDK는 최종 패키지명 확정 후 연결합니다. `google-services.json`과 API 키는 Git에 커밋하지 않습니다.
+DB 스키마는 [`../backend/supabase/schema.sql`](../backend/supabase/schema.sql)에 있습니다. Firebase와 지도 SDK는 최종 패키지명 확정 후 연결합니다. `local.properties`, `google-services.json`, 비밀 키는 Git에 커밋하지 않습니다.

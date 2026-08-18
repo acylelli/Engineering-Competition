@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.watchsafety.guardian.data.GuardianRepository
-import com.watchsafety.guardian.data.MockGuardianRepository
+import com.watchsafety.guardian.data.GuardianRepositoryProvider
 import com.watchsafety.guardian.domain.model.GuardianSnapshot
 import com.watchsafety.guardian.domain.model.NotificationSettings
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,25 +38,32 @@ class GuardianViewModel(
     fun refreshStatus() {
         viewModelScope.launch {
             isRefreshing.value = true
-            repository.refreshStatus()
-            isRefreshing.value = false
+            try {
+                runCatching { repository.refreshStatus() }
+            } finally {
+                isRefreshing.value = false
+            }
         }
     }
 
     fun sendReturnHomeRequest() {
-        viewModelScope.launch { repository.sendReturnHomeRequest() }
+        launchRepositoryAction { repository.sendReturnHomeRequest() }
     }
 
     fun setSafeZoneEnabled(zoneId: String, enabled: Boolean) {
-        viewModelScope.launch { repository.setSafeZoneEnabled(zoneId, enabled) }
+        launchRepositoryAction { repository.setSafeZoneEnabled(zoneId, enabled) }
     }
 
     fun addSafeZone(name: String, radiusMeters: Int) {
-        viewModelScope.launch { repository.addSafeZone(name, radiusMeters) }
+        launchRepositoryAction { repository.addSafeZone(name, radiusMeters) }
     }
 
     fun updateNotificationSettings(settings: NotificationSettings) {
-        viewModelScope.launch { repository.updateNotificationSettings(settings) }
+        launchRepositoryAction { repository.updateNotificationSettings(settings) }
+    }
+
+    private fun launchRepositoryAction(action: suspend () -> Unit) {
+        viewModelScope.launch { runCatching { action() } }
     }
 
     companion object {
@@ -64,7 +71,7 @@ class GuardianViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 require(modelClass.isAssignableFrom(GuardianViewModel::class.java))
-                return GuardianViewModel(MockGuardianRepository()) as T
+                return GuardianViewModel(GuardianRepositoryProvider.create()) as T
             }
         }
     }
