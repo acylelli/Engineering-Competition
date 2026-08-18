@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class SupabaseGuardianRepository(
     private val supabase: SupabaseClient,
@@ -132,6 +134,64 @@ class SupabaseGuardianRepository(
         loadSnapshot()
     }
 
+    override suspend fun redeemPairingCode(
+        code: String,
+    ) {
+
+        if (guardianId == null) {
+            guardianId =
+                ensureAuthenticatedSession()
+        }
+
+        val normalizedCode =
+            code.filter {
+                it.isDigit()
+            }
+
+        require(
+            normalizedCode.length == 6
+        ) {
+            "6자리 연결 코드를 입력해주세요."
+        }
+
+        val parameters =
+            buildJsonObject {
+
+                put(
+                    "p_code",
+                    normalizedCode
+                )
+            }
+
+        val response =
+            supabase
+                .postgrest
+                .rpc(
+                    function =
+                        "redeem_pairing_code",
+
+                    parameters =
+                        parameters
+                )
+                .decodeList<
+                        RedeemPairingCodeResponse
+                        >()
+                .firstOrNull()
+                ?: error(
+                    "연결 결과를 확인할 수 없습니다."
+                )
+
+        if (
+            !response.success
+        ) {
+
+            error(
+                "워치 연결에 실패했습니다."
+            )
+        }
+
+        loadSnapshot()
+    }
     private suspend fun ensureAuthenticatedSession(): String {
         if (supabase.auth.currentSessionOrNull() == null) {
             supabase.auth.signInAnonymously()

@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.ButtonDefaults
+import androidx.wear.compose.material.PositionIndicator
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.ScalingLazyColumn
 import androidx.wear.compose.material.Text
@@ -41,6 +42,7 @@ import androidx.wear.compose.material.VignettePosition
 import androidx.wear.compose.material.curvedText
 import androidx.wear.compose.material.rememberScalingLazyListState
 import com.example.watchsafety.ui.components.rememberBatteryLevel
+
 
 /*
  * ---------------------------------------------------------
@@ -63,12 +65,16 @@ private val HomeSecondaryText = Color(0xFF9B9BA1)
 
 @Composable
 fun HomeScreen(
-    onGoHomeClick: () -> Unit
+    guardianConnected: Boolean,
+    onGoHomeClick: () -> Unit,
+    onGuardianConnectClick: () -> Unit
 ) {
 
     val batteryLevel by rememberBatteryLevel()
 
-    val listState = rememberScalingLazyListState()
+    val listState =
+        rememberScalingLazyListState()
+
 
     /*
      * TODO
@@ -76,10 +82,13 @@ fun HomeScreen(
      */
     val heartRate = "72"
 
+
     Scaffold(
+
         modifier = Modifier
             .fillMaxSize()
             .background(HomeBackground),
+
 
         /*
          * -------------------------------------------------
@@ -98,6 +107,7 @@ fun HomeScreen(
                     HomeGreen
                 }
 
+
             TimeText(
 
                 /*
@@ -112,6 +122,7 @@ fun HomeScreen(
                     )
                 },
 
+
                 /*
                  * Preview나 사각 화면 fallback
                  */
@@ -119,6 +130,7 @@ fun HomeScreen(
 
                     Text(
                         text = "  ▰ $batteryLevel%",
+
                         style = TextStyle(
                             color = batteryColor,
                             fontSize = 9.sp
@@ -128,6 +140,25 @@ fun HomeScreen(
             )
         },
 
+
+        /*
+         * -------------------------------------------------
+         * 오른쪽 스크롤 위치 표시
+         * -------------------------------------------------
+         */
+        positionIndicator = {
+
+            PositionIndicator(
+                scalingLazyListState = listState
+            )
+        },
+
+
+        /*
+         * -------------------------------------------------
+         * 화면 위/아래 가장자리 음영
+         * -------------------------------------------------
+         */
         vignette = {
 
             Vignette(
@@ -135,7 +166,9 @@ fun HomeScreen(
                     VignettePosition.TopAndBottom
             )
         }
+
     ) {
+
 
         /*
          * =================================================
@@ -152,15 +185,13 @@ fun HomeScreen(
 
             state = listState,
 
-            /*
-             * 자동 중앙 정렬을 끄면
-             * 맨 아래 버튼까지 자연스럽게 스크롤 가능
-             */
             autoCentering = null,
+
+            userScrollEnabled = true,
 
             contentPadding = PaddingValues(
                 top = 38.dp,
-                bottom = 34.dp,
+                bottom = 50.dp,
                 start = 10.dp,
                 end = 10.dp
             ),
@@ -173,6 +204,7 @@ fun HomeScreen(
 
         ) {
 
+
             /*
              * =================================================
              * 1. 안전 체크 아이콘
@@ -182,17 +214,24 @@ fun HomeScreen(
             item {
 
                 Box(
+
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(
-                            HomeGreen.copy(alpha = 0.15f)
+                            HomeGreen.copy(
+                                alpha = 0.15f
+                            )
                         ),
-                    contentAlignment = Alignment.Center
+
+                    contentAlignment =
+                        Alignment.Center
+
                 ) {
 
                     SafetyCheckIcon(
-                        modifier = Modifier.size(27.dp)
+                        modifier =
+                            Modifier.size(27.dp)
                     )
                 }
             }
@@ -207,11 +246,14 @@ fun HomeScreen(
             item {
 
                 Text(
+
                     text = "안전",
+
                     style = TextStyle(
                         color = Color.White,
                         fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight =
+                            FontWeight.Bold
                     )
                 )
             }
@@ -226,6 +268,7 @@ fun HomeScreen(
             item {
 
                 Row(
+
                     modifier = Modifier
                         .fillMaxWidth(),
 
@@ -234,12 +277,13 @@ fun HomeScreen(
 
                     verticalAlignment =
                         Alignment.CenterVertically
+
                 ) {
+
 
                     /*
                      * -----------------------------
                      * 낙상
-                     * 넘어지는 사람 아이콘
                      * -----------------------------
                      */
                     HomeStatusCard(
@@ -265,9 +309,6 @@ fun HomeScreen(
                     /*
                      * -----------------------------
                      * 심박수
-                     *
-                     * 채워지지 않은
-                     * 빨간 하트 테두리
                      * -----------------------------
                      */
                     HomeStatusCard(
@@ -293,8 +334,6 @@ fun HomeScreen(
                     /*
                      * -----------------------------
                      * 위치
-                     *
-                     * 초록색 테두리 위치 핀
                      * -----------------------------
                      */
                     HomeStatusCard(
@@ -316,6 +355,7 @@ fun HomeScreen(
             /*
              * 약간의 공간
              */
+
             item {
 
                 Spacer(
@@ -328,15 +368,13 @@ fun HomeScreen(
             /*
              * =================================================
              * 4. 집으로 가기
-             *
-             * 처음 화면에서 안 보여도
-             * 아래로 스크롤하면 나타남
              * =================================================
              */
 
             item {
 
                 Button(
+
                     onClick =
                         onGoHomeClick,
 
@@ -345,19 +383,23 @@ fun HomeScreen(
                         .height(42.dp),
 
                     colors =
-                        ButtonDefaults.buttonColors(
-                            backgroundColor =
-                                HomeBlue
-                        )
+                        ButtonDefaults
+                            .buttonColors(
+                                backgroundColor =
+                                    HomeBlue
+                            )
                 ) {
 
                     Row(
+
                         verticalAlignment =
                             Alignment.CenterVertically,
 
                         horizontalArrangement =
                             Arrangement.Center
+
                     ) {
+
 
                         /*
                          * 집 아이콘
@@ -367,17 +409,24 @@ fun HomeScreen(
                                 Modifier.size(18.dp)
                         )
 
+
                         Spacer(
                             modifier =
                                 Modifier.width(6.dp)
                         )
 
+
                         Text(
+
                             text = "집으로 가기",
 
                             style = TextStyle(
-                                color = Color.White,
-                                fontSize = 12.sp,
+                                color =
+                                    Color.White,
+
+                                fontSize =
+                                    12.sp,
+
                                 fontWeight =
                                     FontWeight.SemiBold
                             )
@@ -388,19 +437,132 @@ fun HomeScreen(
 
 
             /*
-             * 버튼 아래 설명
+             * 집으로 가기 설명
              */
+
             item {
 
                 Text(
-                    text = "안전 귀가 안내",
+
+                    text =
+                        "안전 귀가 안내",
 
                     style = TextStyle(
                         color =
                             HomeSecondaryText,
 
-                        fontSize = 8.sp
+                        fontSize =
+                            8.sp
                     )
+                )
+            }
+
+
+            /*
+             * 간격
+             */
+
+            item {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(6.dp)
+                )
+            }
+
+
+            /*
+             * =================================================
+             * 5. 보호자 연결
+             * =================================================
+             */
+
+            item {
+
+                Button(
+
+                    onClick =
+                        onGuardianConnectClick,
+
+                    modifier =
+                        Modifier
+                            .fillMaxWidth(0.72f)
+                            .height(38.dp),
+
+                    colors =
+                        ButtonDefaults
+                            .buttonColors(
+
+                                backgroundColor =
+                                    if (
+                                        guardianConnected
+                                    ) {
+
+                                        HomeGreen.copy(
+                                            alpha = 0.30f
+                                        )
+
+                                    } else {
+
+                                        HomeCardBackground
+                                    }
+                            )
+                ) {
+
+                    Text(
+
+                        text =
+                            if (
+                                guardianConnected
+                            ) {
+
+                                "✓ 보호자 연결됨"
+
+                            } else {
+
+                                "보호자와 연결"
+                            },
+
+                        style =
+                            TextStyle(
+
+                                color =
+                                    if (
+                                        guardianConnected
+                                    ) {
+
+                                        HomeGreen
+
+                                    } else {
+
+                                        Color.White
+                                    },
+
+                                fontSize =
+                                    10.sp,
+
+                                fontWeight =
+                                    FontWeight.SemiBold
+                            )
+                    )
+                }
+            }
+
+
+            /*
+             * =================================================
+             * 6. 맨 아래 여백
+             *
+             * 마지막 버튼도 충분히 위로 올려서
+             * 볼 수 있도록 스크롤 영역 확보
+             * =================================================
+             */
+
+            item {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(80.dp)
                 )
             }
         }
@@ -412,8 +574,6 @@ fun HomeScreen(
  * =========================================================
  *
  * 안전 체크 아이콘
- *
- * 배경 원 없이 초록 체크만 표시
  *
  * =========================================================
  */
@@ -430,9 +590,7 @@ private fun SafetyCheckIcon(
         val strokeWidth =
             3.5.dp.toPx()
 
-        /*
-         * 체크 왼쪽
-         */
+
         drawLine(
 
             color = HomeGreen,
@@ -453,9 +611,6 @@ private fun SafetyCheckIcon(
         )
 
 
-        /*
-         * 체크 오른쪽
-         */
         drawLine(
 
             color = HomeGreen,
@@ -483,8 +638,6 @@ private fun SafetyCheckIcon(
  *
  * 낙상 아이콘
  *
- * 사람이 앞으로 넘어지는 모습을 단순화한 아이콘
- *
  * =========================================================
  */
 
@@ -502,6 +655,7 @@ private fun FallingPersonIcon(
 
         val strokeWidth =
             2.dp.toPx()
+
 
         /*
          * 머리
@@ -526,8 +680,6 @@ private fun FallingPersonIcon(
 
         /*
          * 몸통
-         *
-         * 오른쪽 아래 방향으로 기울어진 모습
          */
         drawLine(
 
@@ -543,9 +695,11 @@ private fun FallingPersonIcon(
                 y = size.height * 0.61f
             ),
 
-            strokeWidth = strokeWidth,
+            strokeWidth =
+                strokeWidth,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -566,9 +720,11 @@ private fun FallingPersonIcon(
                 y = size.height * 0.51f
             ),
 
-            strokeWidth = strokeWidth,
+            strokeWidth =
+                strokeWidth,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -589,9 +745,11 @@ private fun FallingPersonIcon(
                 y = size.height * 0.34f
             ),
 
-            strokeWidth = strokeWidth,
+            strokeWidth =
+                strokeWidth,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -612,9 +770,11 @@ private fun FallingPersonIcon(
                 y = size.height * 0.77f
             ),
 
-            strokeWidth = strokeWidth,
+            strokeWidth =
+                strokeWidth,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -635,20 +795,23 @@ private fun FallingPersonIcon(
                 y = size.height * 0.83f
             ),
 
-            strokeWidth = strokeWidth,
+            strokeWidth =
+                strokeWidth,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
         /*
-         * 바닥 / 낙상 느낌을 주는 작은 선
+         * 바닥선
          */
         drawLine(
 
-            color = color.copy(
-                alpha = 0.7f
-            ),
+            color =
+                color.copy(
+                    alpha = 0.7f
+                ),
 
             start = Offset(
                 x = size.width * 0.15f,
@@ -663,7 +826,8 @@ private fun FallingPersonIcon(
             strokeWidth =
                 1.4.dp.toPx(),
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
     }
 }
@@ -673,8 +837,6 @@ private fun FallingPersonIcon(
  * =========================================================
  *
  * 심박수 아이콘
- *
- * 채우지 않은 하트 테두리
  *
  * =========================================================
  */
@@ -691,18 +853,12 @@ private fun OutlineHeartIcon(
         val path =
             Path().apply {
 
-                /*
-                 * 아래 중앙부터 시작
-                 */
                 moveTo(
                     size.width * 0.50f,
                     size.height * 0.88f
                 )
 
 
-                /*
-                 * 왼쪽 아래 → 왼쪽 위
-                 */
                 cubicTo(
 
                     size.width * 0.40f,
@@ -716,9 +872,6 @@ private fun OutlineHeartIcon(
                 )
 
 
-                /*
-                 * 왼쪽 하트 둥근 부분
-                 */
                 cubicTo(
 
                     size.width * 0.10f,
@@ -732,9 +885,6 @@ private fun OutlineHeartIcon(
                 )
 
 
-                /*
-                 * 오른쪽 하트 둥근 부분
-                 */
                 cubicTo(
 
                     size.width * 0.64f,
@@ -748,9 +898,6 @@ private fun OutlineHeartIcon(
                 )
 
 
-                /*
-                 * 오른쪽 → 아래 중앙
-                 */
                 cubicTo(
 
                     size.width * 0.90f,
@@ -763,6 +910,7 @@ private fun OutlineHeartIcon(
                     size.height * 0.88f
                 )
 
+
                 close()
             }
 
@@ -774,9 +922,15 @@ private fun OutlineHeartIcon(
             color = HomeRed,
 
             style = Stroke(
-                width = 2.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
+
+                width =
+                    2.dp.toPx(),
+
+                cap =
+                    StrokeCap.Round,
+
+                join =
+                    StrokeJoin.Round
             )
         )
     }
@@ -787,9 +941,6 @@ private fun OutlineHeartIcon(
  * =========================================================
  *
  * 위치 아이콘
- *
- * 사진과 비슷한
- * 테두리형 위치 핀
  *
  * =========================================================
  */
@@ -806,9 +957,7 @@ private fun OutlineLocationIcon(
         val strokeWidth =
             2.dp.toPx()
 
-        /*
-         * 위치 핀 외곽
-         */
+
         val pinPath =
             Path().apply {
 
@@ -869,6 +1018,7 @@ private fun OutlineLocationIcon(
                     size.height * 0.91f
                 )
 
+
                 close()
             }
 
@@ -880,19 +1030,23 @@ private fun OutlineLocationIcon(
             color = HomeGreen,
 
             style = Stroke(
-                width = strokeWidth,
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
+
+                width =
+                    strokeWidth,
+
+                cap =
+                    StrokeCap.Round,
+
+                join =
+                    StrokeJoin.Round
             )
         )
 
 
-        /*
-         * 위치 핀 가운데 동그라미
-         */
         drawCircle(
 
-            color = HomeGreen,
+            color =
+                HomeGreen,
 
             radius =
                 size.minDimension * 0.105f,
@@ -903,7 +1057,8 @@ private fun OutlineLocationIcon(
             ),
 
             style = Stroke(
-                width = strokeWidth
+                width =
+                    strokeWidth
             )
         )
     }
@@ -914,8 +1069,6 @@ private fun OutlineLocationIcon(
  * =========================================================
  *
  * 집 아이콘
- *
- * 버튼용 심플한 흰색 Outline Home
  *
  * =========================================================
  */
@@ -953,9 +1106,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.16f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -976,9 +1131,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.47f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -999,9 +1156,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.84f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -1022,9 +1181,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.84f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -1045,9 +1206,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.84f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -1068,9 +1231,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.61f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -1091,9 +1256,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.61f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
 
 
@@ -1114,9 +1281,11 @@ private fun HomeOutlineIcon(
                 size.height * 0.61f
             ),
 
-            strokeWidth = stroke,
+            strokeWidth =
+                stroke,
 
-            cap = StrokeCap.Round
+            cap =
+                StrokeCap.Round
         )
     }
 }
@@ -1145,7 +1314,9 @@ private fun HomeStatusCard(
             .width(54.dp)
             .height(54.dp)
             .clip(
-                RoundedCornerShape(14.dp)
+                RoundedCornerShape(
+                    14.dp
+                )
             )
             .background(
                 HomeCardBackground
@@ -1156,6 +1327,7 @@ private fun HomeStatusCard(
 
         verticalArrangement =
             Arrangement.Center
+
     ) {
 
         icon()
@@ -1168,13 +1340,16 @@ private fun HomeStatusCard(
 
 
         Text(
+
             text = value,
 
             style = TextStyle(
 
-                color = Color.White,
+                color =
+                    Color.White,
 
-                fontSize = 11.sp,
+                fontSize =
+                    11.sp,
 
                 fontWeight =
                     FontWeight.Bold

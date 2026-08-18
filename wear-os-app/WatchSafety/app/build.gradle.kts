@@ -3,28 +3,54 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+
+    // 프로젝트 Kotlin 버전과 동일하게 맞춤
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.10"
 }
 
-val localProperties = Properties().apply {
 
-    val localPropertiesFile =
-        rootProject.file("local.properties")
+/*
+ * ---------------------------------------------------------
+ * local.properties
+ * ---------------------------------------------------------
+ */
 
-    if (localPropertiesFile.exists()) {
+val localProperties: Properties = Properties().apply {
 
-        localPropertiesFile
-            .inputStream()
-            .use {
-                load(it)
-            }
+    val file = rootProject.file("local.properties")
+
+    if (file.exists()) {
+        file.inputStream().use { stream ->
+            load(stream)
+        }
     }
 }
 
-val tmapAppKey =
+
+/*
+ * ---------------------------------------------------------
+ * API Key / URL
+ * ---------------------------------------------------------
+ */
+
+val tmapAppKey: String =
     localProperties.getProperty(
         "TMAP_APP_KEY",
         ""
     )
+
+val supabaseUrl: String =
+    localProperties.getProperty(
+        "SUPABASE_URL",
+        ""
+    )
+
+val supabasePublishableKey: String =
+    localProperties.getProperty(
+        "SUPABASE_PUBLISHABLE_KEY",
+        ""
+    )
+
 
 android {
 
@@ -34,12 +60,9 @@ android {
 
     defaultConfig {
 
-        applicationId =
-            "com.example.watchsafety"
+        applicationId = "com.example.watchsafety"
 
         minSdk = 30
-
-        // Galaxy Watch 4 테스트 기준
         targetSdk = 35
 
         versionCode = 1
@@ -50,13 +73,28 @@ android {
             "TMAP_APP_KEY",
             "\"$tmapAppKey\""
         )
+
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            "\"$supabaseUrl\""
+        )
+
+        buildConfigField(
+            "String",
+            "SUPABASE_PUBLISHABLE_KEY",
+            "\"$supabasePublishableKey\""
+        )
     }
+
+
 
     buildFeatures {
         compose = true
         buildConfig = true
     }
 }
+
 
 dependencies {
 
@@ -67,6 +105,7 @@ dependencies {
     implementation(
         "androidx.core:core-ktx:1.17.0"
     )
+
 
     // ----------------------------------------
     // Compose
@@ -94,11 +133,10 @@ dependencies {
         "androidx.compose.ui:ui-tooling-preview"
     )
 
-    // setContent()
-    // rememberLauncherForActivityResult()
     implementation(
         "androidx.activity:activity-compose:1.11.0"
     )
+
 
     // ----------------------------------------
     // Wear OS Compose
@@ -112,6 +150,7 @@ dependencies {
         "androidx.wear.compose:compose-foundation:1.5.0"
     )
 
+
     // ----------------------------------------
     // Splash Screen
     // ----------------------------------------
@@ -120,6 +159,7 @@ dependencies {
         "androidx.core:core-splashscreen:1.2.0"
     )
 
+
     // ----------------------------------------
     // GPS
     // ----------------------------------------
@@ -127,6 +167,7 @@ dependencies {
     implementation(
         "com.google.android.gms:play-services-location:21.3.0"
     )
+
 
     // ----------------------------------------
     // Health Services
@@ -140,8 +181,43 @@ dependencies {
         "org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2"
     )
 
+
     // ----------------------------------------
-    // Compose Debug
+    // Icons
+    // ----------------------------------------
+
+    implementation(
+        "androidx.compose.material:material-icons-extended"
+    )
+
+
+    // ----------------------------------------
+    // Supabase
+    // ----------------------------------------
+
+    implementation(
+        platform(
+            "io.github.jan-tennert.supabase:bom:3.2.6"
+        )
+    )
+
+    implementation(
+        "io.github.jan-tennert.supabase:auth-kt"
+    )
+
+    implementation(
+        "io.github.jan-tennert.supabase:postgrest-kt"
+    )
+
+
+    // Supabase HTTP 통신용 Ktor Engine
+    implementation(
+        "io.ktor:ktor-client-okhttp:3.3.1"
+    )
+
+
+    // ----------------------------------------
+    // Debug
     // ----------------------------------------
 
     debugImplementation(
@@ -150,13 +226,5 @@ dependencies {
 
     debugImplementation(
         "androidx.compose.ui:ui-test-manifest"
-    )
-
-    // ----------------------------------------
-    // Compose Icon
-    // ----------------------------------------
-
-    implementation(
-        "androidx.compose.material:material-icons-extended"
     )
 }

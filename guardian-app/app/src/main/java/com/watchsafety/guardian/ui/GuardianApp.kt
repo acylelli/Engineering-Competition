@@ -6,62 +6,250 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.watchsafety.guardian.navigation.BottomDestination
+
 import com.watchsafety.guardian.navigation.GuardianBottomBar
 import com.watchsafety.guardian.navigation.GuardianNavGraph
+import com.watchsafety.guardian.navigation.GuardianRoute
+
 
 @Composable
 fun GuardianApp() {
-    val navController = rememberNavController()
-    val guardianViewModel: GuardianViewModel = viewModel(factory = GuardianViewModel.factory())
-    val uiState by guardianViewModel.uiState.collectAsStateWithLifecycle()
-    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-    val bottomBarRoute = when (currentRoute) {
-        com.watchsafety.guardian.navigation.GuardianRoute.SAFE_ZONES -> {
-            com.watchsafety.guardian.navigation.GuardianRoute.HOME
+
+
+    /*
+     * =====================================================
+     * Navigation
+     * =====================================================
+     */
+
+    val navController =
+        rememberNavController()
+
+
+    /*
+     * =====================================================
+     * ViewModel
+     * =====================================================
+     */
+
+    val guardianViewModel:
+            GuardianViewModel =
+
+        viewModel(
+            factory =
+                GuardianViewModel
+                    .factory()
+        )
+
+
+    /*
+     * 기존 전체 상태
+     */
+    val uiState by
+    guardianViewModel
+        .uiState
+        .collectAsStateWithLifecycle()
+
+
+    /*
+     * 워치 연결 상태
+     */
+    val pairingState by
+    guardianViewModel
+        .pairingUiState
+        .collectAsStateWithLifecycle()
+
+
+    /*
+     * =====================================================
+     * 현재 화면
+     * =====================================================
+     */
+
+    val currentRoute =
+        navController
+            .currentBackStackEntryAsState()
+            .value
+            ?.destination
+            ?.route
+
+
+    /*
+     * 안전구역 화면에서는
+     * 기존처럼 홈 탭 선택 상태 유지
+     */
+    val bottomBarRoute =
+
+        when (
+            currentRoute
+        ) {
+
+            GuardianRoute.SAFE_ZONES -> {
+
+                GuardianRoute.HOME
+            }
+
+            else -> {
+
+                currentRoute
+            }
         }
-        else -> currentRoute
-    }
-    val showBottomBar = currentRoute in setOf(
-        com.watchsafety.guardian.navigation.GuardianRoute.HOME,
-        com.watchsafety.guardian.navigation.GuardianRoute.HISTORY,
-        com.watchsafety.guardian.navigation.GuardianRoute.SETTINGS,
-        com.watchsafety.guardian.navigation.GuardianRoute.SAFE_ZONES,
-    )
+
+
+    /*
+     * 워치 연결 화면에서는
+     * BottomBar를 숨긴다.
+     */
+    val showBottomBar =
+
+        currentRoute in
+                setOf(
+
+                    GuardianRoute.HOME,
+
+                    GuardianRoute.HISTORY,
+
+                    GuardianRoute.SETTINGS,
+
+                    GuardianRoute.SAFE_ZONES,
+                )
+
+
+    /*
+     * =====================================================
+     * 앱 Scaffold
+     * =====================================================
+     */
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+
+        containerColor =
+            MaterialTheme
+                .colorScheme
+                .background,
+
+
         bottomBar = {
-            if (showBottomBar) {
+
+            if (
+                showBottomBar
+            ) {
+
                 GuardianBottomBar(
-                    currentRoute = bottomBarRoute,
-                    onDestinationSelected = { destination ->
-                        navController.navigate(destination.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
+
+                    currentRoute =
+                        bottomBarRoute,
+
+                    onDestinationSelected = {
+                            destination ->
+
+
+                        navController
+                            .navigate(
+                                destination.route
+                            ) {
+
+
+                                popUpTo(
+                                    navController
+                                        .graph
+                                        .startDestinationId
+                                ) {
+
+                                    saveState =
+                                        true
+                                }
+
+
+                                launchSingleTop =
+                                    true
+
+
+                                restoreState =
+                                    true
                             }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
                     },
                 )
             }
         },
-    ) { innerPadding ->
+
+        ) { innerPadding ->
+
+
+        /*
+         * =================================================
+         * Navigation Graph
+         * =================================================
+         */
+
         GuardianNavGraph(
-            navController = navController,
-            snapshot = uiState.snapshot,
-            isRefreshing = uiState.isRefreshing,
-            onRefreshStatus = guardianViewModel::refreshStatus,
-            onReturnHomeRequest = guardianViewModel::sendReturnHomeRequest,
-            onSafeZoneEnabledChange = guardianViewModel::setSafeZoneEnabled,
-            onAddSafeZone = guardianViewModel::addSafeZone,
-            onNotificationSettingsChange = guardianViewModel::updateNotificationSettings,
-            modifier = Modifier.padding(innerPadding),
+
+            navController =
+                navController,
+
+
+            /*
+             * 메인 상태
+             */
+            snapshot =
+                uiState.snapshot,
+
+            isRefreshing =
+                uiState.isRefreshing,
+
+
+            /*
+             * 기존 기능
+             */
+            onRefreshStatus =
+                guardianViewModel::
+                refreshStatus,
+
+            onReturnHomeRequest =
+                guardianViewModel::
+                sendReturnHomeRequest,
+
+            onSafeZoneEnabledChange =
+                guardianViewModel::
+                setSafeZoneEnabled,
+
+            onAddSafeZone =
+                guardianViewModel::
+                addSafeZone,
+
+            onNotificationSettingsChange =
+                guardianViewModel::
+                updateNotificationSettings,
+
+
+            /*
+             * -------------------------------------------------
+             * 워치 페어링
+             * -------------------------------------------------
+             */
+
+            pairingState =
+                pairingState,
+
+            onPairingCodeSubmit =
+                guardianViewModel::
+                redeemPairingCode,
+
+            onResetPairingState =
+                guardianViewModel::
+                resetPairingState,
+
+
+            modifier =
+                Modifier.padding(
+                    innerPadding
+                ),
         )
     }
 }

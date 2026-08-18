@@ -116,3 +116,14 @@ data class SafetyEventInsertDto(
     val title: String,
     val description: String,
 )
+
+@Serializable
+data class RedeemPairingCodeResponse(
+    val success: Boolean,
+
+    @SerialName("device_id")
+    val deviceId: String,
+
+    @SerialName("wearer_id")
+    val wearerId: String,
+)

@@ -73,6 +73,37 @@ class MockGuardianRepository : GuardianRepository {
         _snapshot.value = _snapshot.value.copy(notificationSettings = settings)
     }
 
+    override suspend fun redeemPairingCode(
+        code: String,
+    ) {
+
+        delay(
+            500
+        )
+
+        require(
+            code.length == 6
+        ) {
+            "6자리 연결 코드를 입력해주세요."
+        }
+
+        _snapshot.value =
+            _snapshot.value.copy(
+
+                watchStatus =
+                    _snapshot
+                        .value
+                        .watchStatus
+                        .copy(
+                            isConnected =
+                                true,
+
+                            lastConnectedLabel =
+                                "방금 전"
+                        )
+            )
+    }
+
     private fun createInitialSnapshot(): GuardianSnapshot = GuardianSnapshot(
         user = GuardianUser(
             id = "user-1",
