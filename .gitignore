@@ -1,10 +1,16 @@
 # Android / Gradle
 .gradle/
+.kotlin/
 build/
 **/build/
 local.properties
+.externalNativeBuild/
+.cxx/
+captures/
 *.apk
 *.aab
+*.jks
+*.keystore
 
 # IntelliJ / Android Studio
 .idea/
