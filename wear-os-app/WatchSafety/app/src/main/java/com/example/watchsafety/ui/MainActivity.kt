@@ -10,6 +10,7 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -46,8 +47,15 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
-enum class AppScreen { HOME, FALL_DETECTED, SOS_SENT, COMPASS, OUT_OF_SAFE_ZONE }
+import android.app.AlarmManager
+import android.app.PendingIntent
+enum class AppScreen { HOME, FALL_DETECTED, SOS_SENT, COMPASS, OUT_OF_SAFE_ZONE, MEDICATION_ALERT }
 
+// 🚨 앱 전체에서 공통으로 꺼내 쓸 목적지 보관함입니다!
+object AppConfig {
+    const val DEST_LAT = 37.5884      // 위도
+    const val DEST_LON = 127.0062     // 경도
+}
 class MainActivity : ComponentActivity() {
     private lateinit var heartRateManager: HeartRateManager
     private lateinit var locationManager: WatchLocationManager
@@ -76,6 +84,8 @@ class MainActivity : ComponentActivity() {
         locationManager = WatchLocationManager(this)
         fallManager = FallHealthServiceManager(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        handleIntent(intent)
 
         setContent {
             val heartRate by heartRateManager.heartRate.collectAsState()
@@ -144,6 +154,8 @@ class MainActivity : ComponentActivity() {
             currentScreenState.value = AppScreen.FALL_DETECTED
         } else if (emergencyType == "OUT_OF_SAFE_ZONE") {
             currentScreenState.value = AppScreen.OUT_OF_SAFE_ZONE
+        }else if (emergencyType == "MEDICATION_ALERT") {
+            currentScreenState.value = AppScreen.MEDICATION_ALERT
         }
     }
 
@@ -169,10 +181,14 @@ fun EmergencyManager(
     myLocation: Location?,
     heartRate: Float?
 ) {
+    val context = LocalContext.current
+    val vibrator = remember {
+        context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+    }
     val homeLocation = remember {
         Location("").apply {
-            latitude = 37.6833
-            longitude = 126.7722
+            latitude = AppConfig.DEST_LAT
+            longitude = AppConfig.DEST_LON
         }
     }
     var hasTriggeredSafeZoneAlert by remember { mutableStateOf(false) }
@@ -187,6 +203,30 @@ fun EmergencyManager(
                 onScreenChange(AppScreen.OUT_OF_SAFE_ZONE) // 이탈 시 경고 화면 띄우기
             } else if (distance <= 1000f) {
                 hasTriggeredSafeZoneAlert = false
+            }
+        }
+    }
+    var hasTriggeredHeartRateAlert by remember { mutableStateOf(false) }
+    // 🚨 4. 심박수가 바뀔 때마다 감시하는 핵심 코드!
+    LaunchedEffect(heartRate) {
+        if (heartRate != null) {
+            // 심박수가 50 미만이거나 120 초과일 때!
+            if ((heartRate < 50f || heartRate > 90f) && !hasTriggeredHeartRateAlert) {
+                hasTriggeredHeartRateAlert = true
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(1000)
+                }
+                // 👉 여기에 낙상 감지(10초 카운트다운) 화면으로 넘어가는 코드를 넣습니다!
+                // (예: onScreenChange(AppScreen.FALL_DETECT) 등 유저님이 쓰시는 상태명으로 맞춰주세요)
+                onScreenChange(AppScreen.FALL_DETECTED)
+
+            } else if (heartRate in 50f..90f) {
+                // 심박수가 다시 정상(50~120)으로 돌아오면 경고 장치를 초기화합니다.
+                hasTriggeredHeartRateAlert = false
             }
         }
     }
@@ -216,16 +256,72 @@ fun EmergencyManager(
             onGoHomeClick = { onScreenChange(AppScreen.COMPASS) },
             onDismissClick = { onScreenChange(AppScreen.HOME) }
         )
+        AppScreen.MEDICATION_ALERT -> {
+            val context = LocalContext.current
+            val sharedPref = remember { context.getSharedPreferences("WatchSafetyPrefs", Context.MODE_PRIVATE) }
+
+            MedicationAlertScreen(
+                onTakenClick = {
+                    // 🚨 핵심: 수첩에 '약 먹음(true)'이라고 기록장 남기기!
+                    val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+
+                    // 수첩에 '약 먹음(true)'과 '먹은 날짜'를 세트로 저장합니다!
+                    sharedPref.edit()
+                        .putBoolean("isMedicationTaken", true)
+                        .putString("lastTakenDate", currentDate)
+                        .apply()
+                    onScreenChange(AppScreen.HOME)
+                },
+                onSnoozeClick = {
+                    onScreenChange(AppScreen.HOME)
+                }
+            )
+        }
     }
 }
 
 @Composable
 fun MainScreen(heartRate: Float?, onManualSosClick: () -> Unit, onGoHomeClick: () -> Unit) {
+    val context = LocalContext.current // 알람 매니저를 부르기 위한 도구
+    val sharedPref = remember { context.getSharedPreferences("WatchSafetyPrefs", Context.MODE_PRIVATE) }
+    // 🚨 1. 지금 날짜와 수첩에 적힌(마지막으로 약 먹은) 날짜를 가져와서 비교합니다.
+    val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+    val lastTakenDate = sharedPref.getString("lastTakenDate", "")
+
+    // 🚨 2. 날짜가 다르면(즉, 하루가 지났으면) 도장을 false로 지워버립니다!
+    if (currentDate != lastTakenDate) {
+        sharedPref.edit().putBoolean("isMedicationTaken", false).apply()
+    }
+
+    // 🚨 3. 최종 상태를 가져와서 화면에 반영합니다.
+    var isMedicationTaken by remember {
+        mutableStateOf(sharedPref.getBoolean("isMedicationTaken", false))
+    }
     Column(
         modifier = Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Row(
+            modifier = Modifier
+                .background(if (isMedicationTaken) Color(0xFF4CAF50) else Color.DarkGray, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (isMedicationTaken) Icons.Default.Check else Icons.Default.Notifications,
+                contentDescription = "약",
+                modifier = Modifier.size(14.dp),
+                tint = Color.White
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (isMedicationTaken) "오늘 복약 완료!" else "약 복용 전",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Favorite, contentDescription = "BPM", modifier = Modifier.size(20.dp), tint = Color.Red)
             Spacer(modifier = Modifier.width(4.dp))
@@ -264,6 +360,25 @@ fun MainScreen(heartRate: Float?, onManualSosClick: () -> Unit, onGoHomeClick: (
                     Text(text = "집으로", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                val intent = Intent(context, MedicationReceiver::class.java)
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                // 지금 시간으로부터 10초(10,000밀리초) 뒤에 알람 울리게 설정
+                alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 10000, pendingIntent)
+                Toast.makeText(context, "10초 뒤 약 알림이 울립니다!", Toast.LENGTH_SHORT).show()
+            },
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50), contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(32.dp)
+        ) {
+            Text("10초 알람 테스트", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -413,6 +528,69 @@ fun CompassScreen(myLocation: Location?, homeLocation: Location, onCloseClick: (
                 Icon(Icons.Default.Close, contentDescription = "안내 종료", modifier = Modifier.size(12.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("안내 종료", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+@Composable
+fun MedicationAlertScreen(onTakenClick: () -> Unit, onSnoozeClick: () -> Unit) {
+    // 🚨 1. "이잉~ 이잉~" 진동 모터 준비
+    val context = LocalContext.current
+    val vibrator = remember {
+        context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+    }
+
+    LaunchedEffect(Unit) {
+        // 화면이 켜지자마자 0.5초 진동 -> 0.2초 대기 -> 0.5초 진동 패턴!
+        val pattern = longArrayOf(0, 500, 200, 500)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(pattern, -1)
+        }
+    }
+
+    // 🚨 2. 알림 화면 UI 그리기 (마음이 편안해지는 파란색 배경)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1976D2))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.Notifications, contentDescription = "약 알림", modifier = Modifier.size(36.dp), tint = Color.Yellow)
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(text = "약 드실 시간입니다!", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // [먹었어요] 버튼
+        Button(
+            onClick = onTakenClick,
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50), contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(36.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Check, contentDescription = "먹음", modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("지금 먹었어요!", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // [나중에] 버튼
+        Button(
+            onClick = onSnoozeClick,
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color.DarkGray, contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(28.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Close, contentDescription = "나중에", modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("10분 뒤에 다시", fontSize = 11.sp)
             }
         }
     }

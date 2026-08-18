@@ -196,8 +196,8 @@ fun TmapRouteTestScreen() {
 
                         startLatitude =
                             location.latitude,
-                        endLongitude = 126.7722,
-                        endLatitude = 37.6833
+                        endLongitude = AppConfig.DEST_LON,
+                        endLatitude = AppConfig.DEST_LAT
                     )
 
             statusText =
@@ -261,8 +261,8 @@ fun TmapRouteTestScreen() {
                 android.location.Location.distanceBetween(
                     current.latitude,
                     current.longitude,
-                    37.6833,  // 신일초등학교 위도
-                    126.7722, // 신일초등학교 경도
+                    AppConfig.DEST_LAT,
+                    AppConfig.DEST_LON,
                     results
                 )
                 results[0].toInt()
