@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.ButtonDefaults
+import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.PositionIndicator
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.ScalingLazyColumn
@@ -67,6 +70,7 @@ private val HomeSecondaryText = Color(0xFF9B9BA1)
 fun HomeScreen(
     guardianConnected: Boolean,
     onGoHomeClick: () -> Unit,
+    onSosClick: () -> Unit,
     onGuardianConnectClick: () -> Unit
 ) {
 
@@ -548,23 +552,118 @@ fun HomeScreen(
                 }
             }
 
+            /*
+ * =================================================
+ * 5. SOS 긴급 요청
+ * =================================================
+ */
+
+            item {
+
+                Button(
+
+                    onClick =
+                        onSosClick,
+
+                    modifier = Modifier
+                        .fillMaxWidth(0.72f)
+                        .height(38.dp),
+
+                    colors =
+                        ButtonDefaults
+                            .buttonColors(
+                                backgroundColor =
+                                    Color(0xFFD32F2F)
+                            )
+                ) {
+
+                    Row(
+
+                        verticalAlignment =
+                            Alignment.CenterVertically,
+
+                        horizontalArrangement =
+                            Arrangement.Center
+                    ) {
+
+                        Icon(
+
+                            imageVector =
+                                Icons.Default.Call,
+
+                            contentDescription =
+                                "SOS 긴급 요청",
+
+                            modifier =
+                                Modifier.size(17.dp),
+
+                            tint =
+                                Color.White
+                        )
+
+
+                        Spacer(
+                            modifier =
+                                Modifier.width(6.dp)
+                        )
+
+
+                        Text(
+
+                            text =
+                                "SOS 긴급 요청",
+
+                            style =
+                                TextStyle(
+                                    color =
+                                        Color.White,
+
+                                    fontSize =
+                                        12.sp,
+
+                                    fontWeight =
+                                        FontWeight.Bold
+                                )
+                        )
+                    }
+                }
+            }
+
 
             /*
-             * =================================================
-             * 6. 맨 아래 여백
-             *
-             * 마지막 버튼도 충분히 위로 올려서
-             * 볼 수 있도록 스크롤 영역 확보
-             * =================================================
+             * SOS 설명
              */
+            item {
 
+                Text(
+
+                    text =
+                        "긴급 상황 시 보호자에게 구조 요청",
+
+                    style =
+                        TextStyle(
+                            color =
+                                HomeSecondaryText,
+
+                            fontSize =
+                                8.sp
+                        )
+                )
+            }
+
+
+            /*
+             * 간격
+             */
             item {
 
                 Spacer(
                     modifier =
-                        Modifier.height(80.dp)
+                        Modifier.height(6.dp)
                 )
             }
+
+
         }
     }
 }

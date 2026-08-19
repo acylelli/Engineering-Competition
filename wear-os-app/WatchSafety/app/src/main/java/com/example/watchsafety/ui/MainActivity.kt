@@ -1,14 +1,14 @@
 package com.example.watchsafety.ui
 
 import android.Manifest
-import android.app.AlarmManager
-import android.app.PendingIntent
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
+import android.util.Log
 import android.widget.Toast
 
 import androidx.activity.ComponentActivity
@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.Alignment
@@ -62,11 +63,20 @@ import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 
+import com.example.watchsafety.data.HomeSafeZoneManager
+import com.example.watchsafety.data.ReturnHomeRequestStore
+import com.example.watchsafety.data.ReturnHomeRealtimeManager
+import com.example.watchsafety.data.WatchFcmTokenManager
+import com.example.watchsafety.data.WatchLocationSyncManager
+import com.example.watchsafety.data.WatchSafetyEventManager
+import com.example.watchsafety.data.WatchStatusManager
 import com.example.watchsafety.health.HeartRateManager
+import com.example.watchsafety.location.WatchLocation
 import com.example.watchsafety.location.WatchLocationManager
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
 import com.example.watchsafety.pairing.PairingManager
+import com.example.watchsafety.notification.WatchFirebaseMessagingService
 import com.example.watchsafety.safety.DemoSafetyService
 import com.example.watchsafety.safety.FallEventState
 import com.example.watchsafety.safety.FallHealthServiceManager
@@ -99,33 +109,11 @@ enum class AppScreen {
 
     MEDICATION_ALERT,
 
-    /*
-     * 보호자 연결 코드 화면
-     */
     PAIRING,
 
-    /*
-     * 보호자 연결 성공 화면
-     */
-    PAIRING_SUCCESS
-}
+    PAIRING_SUCCESS,
 
-
-/*
- * =========================================================
- * 앱 설정
- * =========================================================
- */
-
-object AppConfig {
-
-    /*
-     * 현재 테스트용 목적지
-     * 한성대학교 근처
-     */
-    const val DEST_LAT = 37.5884
-
-    const val DEST_LON = 127.0062
+    RETURN_HOME_REQUEST
 }
 
 
@@ -137,22 +125,93 @@ object AppConfig {
 
 class MainActivity : ComponentActivity() {
 
+
     private lateinit var heartRateManager:
             HeartRateManager
+
 
     private lateinit var locationManager:
             WatchLocationManager
 
+
     private lateinit var fallManager:
             FallHealthServiceManager
+
+
+    /*
+     * 배터리 / 연결상태
+     */
+    private lateinit var watchStatusManager:
+            WatchStatusManager
+
+
+    /*
+     * GPS → Supabase
+     */
+    private lateinit var watchLocationSyncManager:
+            WatchLocationSyncManager
+
+
+    /*
+     * 낙상 / SOS → Supabase
+     */
+    private lateinit var watchSafetyEventManager:
+            WatchSafetyEventManager
+
+
+    /*
+     * 보호자 귀가 요청 Realtime
+     */
+    private lateinit var returnHomeRealtimeManager:
+            ReturnHomeRealtimeManager
+
+
+    /*
+     * 실제 페어링 정보
+     */
+    private lateinit var pairingManager:
+            PairingManager
+
+
+    /*
+     * 실제 집 안전구역
+     */
+    private lateinit var homeSafeZoneManager:
+            HomeSafeZoneManager
+
+
+    /*
+     * Firebase FCM Token
+     */
+    private lateinit var watchFcmTokenManager:
+            WatchFcmTokenManager
+
+
+    /*
+     * 귀가 요청 중복 처리 방지
+     */
+    private lateinit var returnHomeRequestStore:
+            ReturnHomeRequestStore
+
+
+    /*
+     * Realtime 수신 시 현재 Activity가 실제 화면에 보이는지 확인
+     */
+    private var isActivityResumed:
+            Boolean = false
 
 
     private lateinit var fusedLocationClient:
             FusedLocationProviderClient
 
 
+    /*
+     * 기존 안전구역 계산용
+     */
     private val myLocationState =
-        mutableStateOf<Location?>(null)
+        mutableStateOf<Location?>(
+            null
+        )
 
 
     private val currentScreenState =
@@ -160,6 +219,42 @@ class MainActivity : ComponentActivity() {
             AppScreen.HOME
         )
 
+
+    /*
+     * 현재 보호자 귀가 요청 ID
+     */
+    private val currentReturnHomeRequestIdState =
+        mutableStateOf<String?>(null)
+
+
+    /*
+     * 실제 페어링 ID
+     */
+    private val guardianIdState =
+        mutableStateOf<String?>(null)
+
+    private val wearerIdState =
+        mutableStateOf<String?>(null)
+
+
+    /*
+     * DB의 실제 집 안전구역
+     */
+    private val homeLatitudeState =
+        mutableStateOf<Double?>(null)
+
+    private val homeLongitudeState =
+        mutableStateOf<Double?>(null)
+
+    private val homeRadiusMetersState =
+        mutableStateOf<Double?>(null)
+
+
+    /*
+     * =====================================================
+     * onCreate
+     * =====================================================
+     */
 
     override fun onCreate(
         savedInstanceState: Bundle?
@@ -171,9 +266,7 @@ class MainActivity : ComponentActivity() {
 
 
         /*
-         * -------------------------------------------------
-         * 잠금 화면에서도 긴급 화면 표시
-         * -------------------------------------------------
+         * 잠금 화면에서도 긴급화면 표시
          */
 
         if (
@@ -181,9 +274,13 @@ class MainActivity : ComponentActivity() {
             Build.VERSION_CODES.O_MR1
         ) {
 
-            setShowWhenLocked(true)
+            setShowWhenLocked(
+                true
+            )
 
-            setTurnScreenOn(true)
+            setTurnScreenOn(
+                true
+            )
 
         } else {
 
@@ -207,9 +304,9 @@ class MainActivity : ComponentActivity() {
 
 
         /*
-         * -------------------------------------------------
+         * =================================================
          * Manager 초기화
-         * -------------------------------------------------
+         * =================================================
          */
 
         heartRateManager =
@@ -217,14 +314,54 @@ class MainActivity : ComponentActivity() {
                 this
             )
 
+
         locationManager =
             WatchLocationManager(
                 this
             )
 
+
         fallManager =
             FallHealthServiceManager(
                 this
+            )
+
+
+        watchStatusManager =
+            WatchStatusManager(
+                this
+            )
+
+
+        watchLocationSyncManager =
+            WatchLocationSyncManager()
+
+
+        watchSafetyEventManager =
+            WatchSafetyEventManager()
+
+
+        pairingManager =
+            PairingManager()
+
+
+        homeSafeZoneManager =
+            HomeSafeZoneManager()
+
+
+        watchFcmTokenManager =
+            WatchFcmTokenManager()
+
+
+        returnHomeRequestStore =
+            ReturnHomeRequestStore(
+                applicationContext
+            )
+
+
+        returnHomeRealtimeManager =
+            ReturnHomeRealtimeManager(
+                lifecycleScope
             )
 
 
@@ -236,7 +373,23 @@ class MainActivity : ComponentActivity() {
 
 
         /*
-         * 알림 등을 통해 앱이 실행되었을 때 처리
+         * 배터리 상태 감시
+         */
+        watchStatusManager
+            .start(
+                lifecycleScope
+            )
+
+
+        /*
+         * 실제 페어링 정보 조회 후
+         * 귀가 요청 Realtime 시작
+         */
+        refreshPairingAndStartRealtime()
+
+
+        /*
+         * 알림 Intent 처리
          */
         handleIntent(
             intent
@@ -244,12 +397,13 @@ class MainActivity : ComponentActivity() {
 
 
         /*
-         * -------------------------------------------------
+         * =================================================
          * Compose
-         * -------------------------------------------------
+         * =================================================
          */
 
         setContent {
+
 
             val heartRate by
             heartRateManager
@@ -257,6 +411,10 @@ class MainActivity : ComponentActivity() {
                 .collectAsState()
 
 
+            /*
+             * WatchLocationManager의
+             * 실제 지속 GPS
+             */
             val location by
             locationManager
                 .location
@@ -270,9 +428,9 @@ class MainActivity : ComponentActivity() {
 
 
             /*
-             * -------------------------------------------------
-             * 낙상 발생 감시
-             * -------------------------------------------------
+             * =================================================
+             * 실제 낙상 감지
+             * =================================================
              */
 
             LaunchedEffect(
@@ -283,16 +441,72 @@ class MainActivity : ComponentActivity() {
                     isFallDetected
                 ) {
 
+
+                    /*
+                     * 우선 확인 화면 표시
+                     */
                     currentScreenState.value =
                         AppScreen.FALL_DETECTED
+
+
+                    val currentLocation =
+                        location
+
+
+                    /*
+                     * 낙상 순간의 GPS는
+                     * 30m / 1분 정책과 관계없이
+                     * 즉시 locations에 저장
+                     */
+                    if (
+                        currentLocation != null
+                    ) {
+
+                        runCatching {
+
+                            watchLocationSyncManager
+                                .forceSync(
+                                    currentLocation
+                                )
+
+                        }.onFailure { error ->
+
+                            Log.w(
+                                "WatchFall",
+                                "낙상 위치 저장 실패: ${error.message}",
+                                error
+                            )
+                        }
+                    }
+
+
+                    /*
+                     * safety_events에
+                     * FALL_SUSPECTED 저장
+                     */
+                    runCatching {
+
+                        watchSafetyEventManager
+                            .recordFallSuspected(
+                                currentLocation
+                            )
+
+                    }.onFailure { error ->
+
+                        Log.w(
+                            "WatchFall",
+                            "낙상 이벤트 저장 실패: ${error.message}",
+                            error
+                        )
+                    }
                 }
             }
 
 
             /*
-             * -------------------------------------------------
+             * =================================================
              * 권한 요청
-             * -------------------------------------------------
+             * =================================================
              */
 
             val permissionLauncher =
@@ -302,6 +516,7 @@ class MainActivity : ComponentActivity() {
                         .RequestMultiplePermissions()
 
                 ) { permissions ->
+
 
                     val allGranted =
                         permissions
@@ -315,6 +530,7 @@ class MainActivity : ComponentActivity() {
                         allGranted
                     ) {
 
+
                         /*
                          * 심박수
                          */
@@ -323,20 +539,21 @@ class MainActivity : ComponentActivity() {
 
 
                         /*
-                         * 위치
+                         * GPS
                          */
                         locationManager
                             .start()
 
 
                         /*
-                         * 현재 위치 1회 조회
+                         * 안전구역 계산용
+                         * 위치 1회 조회
                          */
                         getLocation()
 
 
                         /*
-                         * 낙상 감지 등록
+                         * Health Services 낙상 감지
                          */
                         lifecycleScope.launch {
 
@@ -352,7 +569,7 @@ class MainActivity : ComponentActivity() {
 
 
                         /*
-                         * 데모 안전 서비스
+                         * 기존 데모 안전 서비스
                          */
                         startService(
 
@@ -361,6 +578,7 @@ class MainActivity : ComponentActivity() {
                                 DemoSafetyService::class.java
                             )
                         )
+
 
                     } else {
 
@@ -376,9 +594,8 @@ class MainActivity : ComponentActivity() {
 
 
             /*
-             * 앱 시작 시 권한 요청
+             * 앱 시작 권한 요청
              */
-
             LaunchedEffect(
                 Unit
             ) {
@@ -408,9 +625,9 @@ class MainActivity : ComponentActivity() {
 
 
             /*
-             * -------------------------------------------------
+             * =================================================
              * UI
-             * -------------------------------------------------
+             * =================================================
              */
 
             MaterialTheme {
@@ -420,6 +637,7 @@ class MainActivity : ComponentActivity() {
                     currentScreen =
                         currentScreenState.value,
 
+
                     onScreenChange = {
                             newScreen ->
 
@@ -427,13 +645,92 @@ class MainActivity : ComponentActivity() {
                             newScreen
                     },
 
+
+                    returnHomeRequestId =
+                        currentReturnHomeRequestIdState.value,
+
+
+                    returnHomeRealtimeManager =
+                        returnHomeRealtimeManager,
+
+
+                    guardianId =
+                        guardianIdState.value,
+
+
+                    wearerId =
+                        wearerIdState.value,
+
+
+                    homeLatitude =
+                        homeLatitudeState.value,
+
+
+                    homeLongitude =
+                        homeLongitudeState.value,
+
+
+                    homeRadiusMeters =
+                        homeRadiusMetersState.value,
+
+
+                    pairingManager =
+                        pairingManager,
+
+
+                    onPairingCompleted = {
+                        refreshPairingAndStartRealtime()
+                    },
+
+
+                    onClearReturnHomeRequest = {
+                        currentReturnHomeRequestIdState.value = null
+                    },
+
+
+                    onReturnHomeRequestAccepted = { requestId ->
+
+                        returnHomeRequestStore
+                            .markHandled(
+                                requestId
+                            )
+
+                        cancelReturnHomeNotification(
+                            requestId
+                        )
+                    },
+
+
                     myLocation =
                         myLocationState.value,
+
+
+                    /*
+                     * 실제 지속 GPS
+                     */
+                    watchLocation =
+                        location,
+
 
                     heartRate =
                         heartRate
                             ?.toString()
-                            ?.toFloatOrNull()
+                            ?.toFloatOrNull(),
+
+
+                    watchStatusManager =
+                        watchStatusManager,
+
+
+                    watchLocationSyncManager =
+                        watchLocationSyncManager,
+
+
+                    /*
+                     * 안전 이벤트 Manager
+                     */
+                    watchSafetyEventManager =
+                        watchSafetyEventManager
                 )
             }
         }
@@ -442,7 +739,175 @@ class MainActivity : ComponentActivity() {
 
     /*
      * =====================================================
-     * 알림으로 앱이 이미 실행 중일 때
+     * 실제 페어링 정보 조회 + Realtime 시작
+     * =====================================================
+     */
+    private fun refreshPairingAndStartRealtime() {
+
+        lifecycleScope.launch {
+
+            runCatching {
+                pairingManager.getPairingInfo()
+            }.onSuccess { info ->
+
+                if (
+                    !info.isPaired ||
+                    info.guardianId.isNullOrBlank() ||
+                    info.wearerId.isNullOrBlank()
+                ) {
+                    guardianIdState.value = null
+                    wearerIdState.value = null
+                    homeLatitudeState.value = null
+                    homeLongitudeState.value = null
+                    homeRadiusMetersState.value = null
+                    returnHomeRealtimeManager.stop()
+                    Log.d("PairingInfo", "현재 페어링 정보 없음")
+                    return@onSuccess
+                }
+
+                val guardianId =
+                    info.guardianId
+                        ?: return@onSuccess
+
+                val wearerId =
+                    info.wearerId
+                        ?: return@onSuccess
+
+                guardianIdState.value = guardianId
+                wearerIdState.value = wearerId
+
+                Log.d(
+                    "PairingInfo",
+                    "실제 페어링 정보 조회 성공 guardianId=$guardianId wearerId=$wearerId"
+                )
+
+                /*
+                 * 현재 워치 FCM Token → devices.watch_fcm_token 동기화
+                 */
+                runCatching {
+                    watchFcmTokenManager.syncCurrentToken()
+                }.onSuccess {
+                    Log.d(
+                        "WatchFCM",
+                        "현재 FCM 토큰 동기화 성공"
+                    )
+                }.onFailure { error ->
+                    Log.e(
+                        "WatchFCM",
+                        "현재 FCM 토큰 동기화 실패",
+                        error
+                    )
+                }
+
+                refreshHomeSafeZone()
+
+                returnHomeRealtimeManager.stop()
+                returnHomeRealtimeManager.start(
+                    guardianId = guardianId,
+                    wearerId = wearerId
+                ) { requestId ->
+
+                    if (
+                        returnHomeRequestStore
+                            .isHandled(
+                                requestId
+                            )
+                    ) {
+                        Log.d(
+                            "ReturnHomeRealtime",
+                            "이미 처리한 귀가 요청 무시: $requestId"
+                        )
+                        return@start
+                    }
+
+                    /*
+                     * Activity가 백그라운드여도 요청 ID는 보관한다.
+                     * 이 경우 FCM 알림은 막지 않는다.
+                     */
+                    currentReturnHomeRequestIdState.value =
+                        requestId
+
+                    currentScreenState.value =
+                        AppScreen.RETURN_HOME_REQUEST
+
+                    if (
+                        isActivityResumed
+                    ) {
+                        /*
+                         * 화면에 앱이 보이는 경우 Realtime이 직접 화면을 표시하므로
+                         * 같은 request_id의 FCM 알림이 중복 표시되지 않게 기록한다.
+                         */
+                        returnHomeRequestStore
+                            .markNotified(
+                                requestId
+                            )
+
+                        cancelReturnHomeNotification(
+                            requestId
+                        )
+                    }
+
+                    Log.d(
+                        "ReturnHomeRealtime",
+                        "워치 귀가 요청 수신: $requestId"
+                    )
+                }
+
+            }.onFailure { error ->
+                Log.e(
+                    "PairingInfo",
+                    "페어링 정보 조회 실패",
+                    error
+                )
+            }
+        }
+    }
+
+    /*
+     * =====================================================
+     * DB의 실제 집 안전구역 조회
+     * =====================================================
+     */
+    private fun refreshHomeSafeZone() {
+
+        lifecycleScope.launch {
+
+            runCatching {
+                homeSafeZoneManager.getHomeSafeZone()
+            }.onSuccess { home ->
+
+                if (
+                    !home.isConfigured ||
+                    home.centerLatitude == null ||
+                    home.centerLongitude == null
+                ) {
+                    homeLatitudeState.value = null
+                    homeLongitudeState.value = null
+                    homeRadiusMetersState.value = null
+                    Log.d("HomeSafeZone", "등록된 집 안전구역이 없습니다.")
+                    return@onSuccess
+                }
+
+                homeLatitudeState.value = home.centerLatitude
+                homeLongitudeState.value = home.centerLongitude
+                homeRadiusMetersState.value = home.radiusMeters
+
+                Log.d(
+                    "HomeSafeZone",
+                    "집 안전구역 조회 성공 latitude=${home.centerLatitude} " +
+                            "longitude=${home.centerLongitude} radius=${home.radiusMeters}"
+                )
+
+            }.onFailure { error ->
+                Log.e("HomeSafeZone", "집 안전구역 조회 실패", error)
+            }
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 새 Intent
      * =====================================================
      */
 
@@ -477,13 +942,103 @@ class MainActivity : ComponentActivity() {
         val emergencyType =
             intent
                 ?.getStringExtra(
-                    "EMERGENCY_TYPE"
+                    WatchFirebaseMessagingService
+                        .EXTRA_EMERGENCY_TYPE
                 )
 
 
         when (
             emergencyType
         ) {
+
+
+            WatchFirebaseMessagingService
+                .TYPE_RETURN_HOME_REQUEST -> {
+
+                val requestId =
+                    intent
+                        .getStringExtra(
+                            WatchFirebaseMessagingService
+                                .EXTRA_REQUEST_ID
+                        )
+
+                val pushGuardianId =
+                    intent
+                        .getStringExtra(
+                            WatchFirebaseMessagingService
+                                .EXTRA_GUARDIAN_ID
+                        )
+
+                val pushWearerId =
+                    intent
+                        .getStringExtra(
+                            WatchFirebaseMessagingService
+                                .EXTRA_WEARER_ID
+                        )
+
+                if (
+                    requestId.isNullOrBlank()
+                ) {
+                    Log.w(
+                        "ReturnHomeFCM",
+                        "귀가 요청 request_id가 없습니다."
+                    )
+                    return
+                }
+
+                if (
+                    returnHomeRequestStore
+                        .isHandled(
+                            requestId
+                        )
+                ) {
+                    Log.d(
+                        "ReturnHomeFCM",
+                        "이미 처리된 귀가 요청 알림 클릭 무시: $requestId"
+                    )
+
+                    cancelReturnHomeNotification(
+                        requestId
+                    )
+
+                    return
+                }
+
+                returnHomeRequestStore
+                    .markNotified(
+                        requestId
+                    )
+
+                cancelReturnHomeNotification(
+                    requestId
+                )
+
+                currentReturnHomeRequestIdState.value =
+                    requestId
+
+                if (
+                    !pushGuardianId.isNullOrBlank()
+                ) {
+                    guardianIdState.value =
+                        pushGuardianId
+                }
+
+                if (
+                    !pushWearerId.isNullOrBlank()
+                ) {
+                    wearerIdState.value =
+                        pushWearerId
+                }
+
+                currentScreenState.value =
+                    AppScreen.RETURN_HOME_REQUEST
+
+                Log.d(
+                    "ReturnHomeFCM",
+                    "귀가 요청 Notification 클릭 requestId=$requestId"
+                )
+            }
+
 
             "FALL_DETECTED" -> {
 
@@ -510,7 +1065,30 @@ class MainActivity : ComponentActivity() {
 
     /*
      * =====================================================
-     * 현재 GPS 위치
+     * 동일 귀가 요청 Notification 제거
+     * =====================================================
+     */
+
+    private fun cancelReturnHomeNotification(
+        requestId: String
+    ) {
+
+        val manager =
+            getSystemService(
+                NotificationManager::class.java
+            )
+
+        manager.cancel(
+            WatchFirebaseMessagingService
+                .notificationId(
+                    requestId
+                )
+        )
+    }
+
+    /*
+     * =====================================================
+     * 안전구역 계산용 위치
      * =====================================================
      */
 
@@ -527,6 +1105,7 @@ class MainActivity : ComponentActivity() {
             .addOnSuccessListener {
                     location: Location? ->
 
+
                 if (
                     location != null
                 ) {
@@ -540,114 +1119,269 @@ class MainActivity : ComponentActivity() {
 
     /*
      * =====================================================
+     * Activity 화면 상태
+     * =====================================================
+     */
+
+    override fun onResume() {
+        super.onResume()
+        isActivityResumed = true
+    }
+
+
+    override fun onPause() {
+        isActivityResumed = false
+        super.onPause()
+    }
+
+
+    /*
+     * =====================================================
      * 종료
      * =====================================================
      */
 
     override fun onDestroy() {
 
-        super.onDestroy()
+
+        returnHomeRealtimeManager
+            .stop()
+
+
+        watchStatusManager
+            .stop()
+
+
+        watchLocationSyncManager
+            .reset()
+
 
         heartRateManager
             .stop()
 
+
         locationManager
             .stop()
+
+
+        super.onDestroy()
     }
 }
 
 
 /*
  * =========================================================
- *
- * 화면 관리자
- *
+ * EmergencyManager
  * =========================================================
  */
 
 @Composable
 fun EmergencyManager(
 
-    currentScreen: AppScreen,
+    currentScreen:
+    AppScreen,
+
 
     onScreenChange:
         (AppScreen) -> Unit,
 
+
+    returnHomeRequestId:
+    String?,
+
+
+    returnHomeRealtimeManager:
+    ReturnHomeRealtimeManager,
+
+
+    guardianId:
+    String?,
+
+
+    wearerId:
+    String?,
+
+
+    homeLatitude:
+    Double?,
+
+
+    homeLongitude:
+    Double?,
+
+
+    homeRadiusMeters:
+    Double?,
+
+
+    pairingManager:
+    PairingManager,
+
+
+    onPairingCompleted:
+        () -> Unit,
+
+
+    onClearReturnHomeRequest:
+        () -> Unit,
+
+
+    onReturnHomeRequestAccepted:
+        (String) -> Unit,
+
+
+    /*
+     * 기존 안전구역 계산용
+     */
     myLocation:
     Location?,
 
+
+    /*
+     * 지속 GPS
+     */
+    watchLocation:
+    WatchLocation?,
+
+
     heartRate:
-    Float?
+    Float?,
+
+
+    watchStatusManager:
+    WatchStatusManager,
+
+
+    watchLocationSyncManager:
+    WatchLocationSyncManager,
+
+
+    watchSafetyEventManager:
+    WatchSafetyEventManager
 
 ) {
+
 
     val context =
         LocalContext.current
 
 
     /*
-     * -----------------------------------------------------
-     * 진동
-     * -----------------------------------------------------
+     * Composable 버튼에서
+     * suspend 함수를 실행하기 위한 Scope
      */
-
-    val vibrator =
-        remember {
-
-            context
-                .getSystemService(
-                    Context.VIBRATOR_SERVICE
-                ) as android.os.Vibrator
-        }
+    val eventScope =
+        rememberCoroutineScope()
 
 
     /*
-     * -----------------------------------------------------
-     * 보호자 연결 Manager
-     * -----------------------------------------------------
+     * =====================================================
+     * 실제 페어링 여부
+     * =====================================================
      */
 
-    val pairingManager =
-        remember {
-
-            PairingManager()
-        }
+    val guardianConnected =
+        guardianId != null && wearerId != null
 
 
     /*
-     * 연결 성공 여부
-     *
-     * 현재는 앱 실행 중 연결 성공 시 true.
-     * 이후 Supabase에서 앱 시작 시 연결 상태도
-     * 조회하도록 개선 예정.
+     * =====================================================
+     * 연결된 경우 배터리 즉시 저장
+     * =====================================================
      */
-    var guardianConnected by
-    remember {
 
-        mutableStateOf(
-            false
-        )
+    LaunchedEffect(
+        guardianConnected
+    ) {
+
+        if (
+            guardianConnected
+        ) {
+
+            runCatching {
+
+                watchStatusManager
+                    .syncBatteryNow()
+
+            }.onFailure { error ->
+
+                Log.w(
+                    "WatchStatus",
+                    "배터리 즉시 동기화 실패: ${error.message}",
+                    error
+                )
+            }
+        }
     }
 
 
     /*
-     * -----------------------------------------------------
-     * 집 위치
-     * -----------------------------------------------------
+     * =====================================================
+     * GPS → Supabase
+     * =====================================================
+     *
+     * 첫 위치
+     * 또는
+     * 30m 이동
+     * 또는
+     * 1분 경과
+     */
+
+    LaunchedEffect(
+        guardianConnected,
+        watchLocation
+    ) {
+
+
+        if (
+            !guardianConnected
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        val currentLocation =
+            watchLocation
+                ?: return@LaunchedEffect
+
+
+        runCatching {
+
+            watchLocationSyncManager
+                .syncIfNeeded(
+                    currentLocation
+                )
+
+        }.onFailure { error ->
+
+            Log.w(
+                "WatchLocationSync",
+                "위치 동기화 실패: ${error.message}",
+                error
+            )
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * DB에서 조회한 실제 집 위치
+     * =====================================================
      */
 
     val homeLocation =
-        remember {
-
-            Location(
-                ""
-            ).apply {
-
-                latitude =
-                    AppConfig.DEST_LAT
-
-                longitude =
-                    AppConfig.DEST_LON
+        remember(
+            homeLatitude,
+            homeLongitude
+        ) {
+            if (homeLatitude != null && homeLongitude != null) {
+                Location("").apply {
+                    latitude = homeLatitude
+                    longitude = homeLongitude
+                }
+            } else {
+                null
             }
         }
 
@@ -660,1257 +1394,894 @@ fun EmergencyManager(
 
     var hasTriggeredSafeZoneAlert by
     remember {
-
-        mutableStateOf(
-            false
-        )
+        mutableStateOf(false)
     }
 
 
     LaunchedEffect(
-        myLocation
+        myLocation,
+        homeLocation,
+        homeRadiusMeters
     ) {
+        val currentLocation = myLocation ?: return@LaunchedEffect
+        val currentHome = homeLocation ?: return@LaunchedEffect
+        val radius = homeRadiusMeters ?: return@LaunchedEffect
+
+        val distance =
+            currentLocation.distanceTo(currentHome)
 
         if (
-            myLocation != null
+            distance > radius.toFloat() &&
+            !hasTriggeredSafeZoneAlert
         ) {
+            hasTriggeredSafeZoneAlert = true
+            onScreenChange(AppScreen.OUT_OF_SAFE_ZONE)
+        } else if (distance <= radius.toFloat()) {
+            hasTriggeredSafeZoneAlert = false
+        }
+    }
 
-            val distance =
-                myLocation
-                    .distanceTo(
-                        homeLocation
-                    )
 
+    /*
+     * =====================================================
+     * 심박수 이상 → 구조요청
+     *
+     * 현재 비활성화
+     * =====================================================
+     */
 
-            /*
-             * 테스트 기준
-             * 집에서 1km 이상 벗어나면 경고
-             */
+    /*
+    var hasTriggeredHeartRateAlert by
+        remember {
+            mutableStateOf(false)
+        }
+
+    LaunchedEffect(heartRate) {
+
+        if (heartRate != null) {
+
             if (
-                distance > 1000f &&
-                !hasTriggeredSafeZoneAlert
+                (heartRate < 50f || heartRate > 90f) &&
+                !hasTriggeredHeartRateAlert
             ) {
 
-                hasTriggeredSafeZoneAlert =
-                    true
+                hasTriggeredHeartRateAlert = true
 
                 onScreenChange(
-                    AppScreen.OUT_OF_SAFE_ZONE
+                    AppScreen.FALL_DETECTED
                 )
 
             } else if (
-                distance <= 1000f
+                heartRate in 50f..90f
             ) {
 
-                hasTriggeredSafeZoneAlert =
-                    false
+                hasTriggeredHeartRateAlert = false
             }
         }
     }
+    */
 
 
     /*
      * =====================================================
-     * 심박수 이상 감시
+     * 화면 전환
      * =====================================================
      */
-/*
-var hasTriggeredHeartRateAlert by
-remember {
 
-    mutableStateOf(
-        false
-    )
-}
-
-
-LaunchedEffect(
-    heartRate
-) {
-
-    if (
-        heartRate != null
+    when (
+        currentScreen
     ) {
 
+
         /*
-         * 테스트용 기준
-         *
-         * 50 미만
-         * 또는
-         * 90 초과
+         * =================================================
+         * 홈
+         * =================================================
          */
-        if (
-            (
-                    heartRate < 50f ||
-                            heartRate > 90f
-                    ) &&
-            !hasTriggeredHeartRateAlert
-        ) {
 
-            hasTriggeredHeartRateAlert =
-                true
+        AppScreen.HOME -> {
+
+            HomeScreen(
+
+                guardianConnected =
+                    guardianConnected,
+
+                onGoHomeClick = {
+
+                    onClearReturnHomeRequest()
+
+                    onScreenChange(
+                        AppScreen.COMPASS
+                    )
+                },
+
+                /*
+                 * 홈 SOS 버튼
+                 */
+                onSosClick = {
+
+                    val locationSnapshot =
+                        watchLocation
 
 
-            /*
-             * 진동
-             */
-            if (
-                Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.O
-            ) {
+                    /*
+                     * 우선 화면 즉시 전환
+                     */
+                    onScreenChange(
+                        AppScreen.SOS_SENT
+                    )
 
-                vibrator.vibrate(
 
-                    VibrationEffect
-                        .createOneShot(
-                            1000,
-                            VibrationEffect
-                                .DEFAULT_AMPLITUDE
+                    eventScope.launch {
+
+                        /*
+                         * SOS 발생 순간 위치 강제 저장
+                         */
+                        if (
+                            locationSnapshot != null
+                        ) {
+
+                            runCatching {
+
+                                watchLocationSyncManager
+                                    .forceSync(
+                                        locationSnapshot
+                                    )
+
+                            }.onFailure { error ->
+
+                                Log.w(
+                                    "WatchSOS",
+                                    "SOS 위치 저장 실패: ${error.message}",
+                                    error
+                                )
+                            }
+                        }
+
+
+                        /*
+                         * safety_events에
+                         * SOS_MANUAL 저장
+                         */
+                        runCatching {
+
+                            watchSafetyEventManager
+                                .recordManualSos(
+                                    locationSnapshot
+                                )
+
+                        }.onFailure { error ->
+
+                            Log.w(
+                                "WatchSOS",
+                                "SOS 저장 실패: ${error.message}",
+                                error
+                            )
+                        }
+                    }
+                },
+
+                onGuardianConnectClick = {
+
+                    if (
+                        !guardianConnected
+                    ) {
+
+                        onScreenChange(
+                            AppScreen.PAIRING
                         )
-                )
-
-            } else {
-
-                @Suppress("DEPRECATION")
-
-                vibrator.vibrate(
-                    1000
-                )
-            }
-
-
-            /*
-             * 현재는 낙상 확인 화면 사용
-             */
-            onScreenChange(
-                AppScreen.FALL_DETECTED
+                    }
+                }
             )
+        }
 
-        } else if (
-            heartRate in 50f..90f
-        ) {
 
-            hasTriggeredHeartRateAlert =
-                false
+        /*
+         * =================================================
+         * 보호자 페어링
+         * =================================================
+         */
+
+        AppScreen.PAIRING -> {
+
+            PairingScreen(
+
+                pairingManager =
+                    pairingManager,
+
+
+                onConnected = {
+
+                    onPairingCompleted()
+
+                    onScreenChange(
+                        AppScreen.PAIRING_SUCCESS
+                    )
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 페어링 완료
+         * =================================================
+         */
+
+        AppScreen.PAIRING_SUCCESS -> {
+
+            PairingSuccessScreen(
+
+                onFinished = {
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 보호자 귀가 요청
+         * =================================================
+         */
+
+        AppScreen.RETURN_HOME_REQUEST -> {
+
+            ReturnHomeRequestScreen(
+
+                onGoHomeClick = {
+                    val requestId = returnHomeRequestId
+                    val currentGuardianId = guardianId
+                    val currentWearerId = wearerId
+
+                    if (
+                        requestId == null ||
+                        currentGuardianId == null ||
+                        currentWearerId == null
+                    ) {
+                        Toast.makeText(
+                            context,
+                            "귀가 요청 정보를 확인할 수 없습니다.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        eventScope.launch {
+                            runCatching {
+                                returnHomeRealtimeManager.acceptRequest(
+                                    requestId = requestId,
+                                    guardianId = currentGuardianId,
+                                    wearerId = currentWearerId
+                                )
+                            }.onSuccess {
+
+                                onReturnHomeRequestAccepted(
+                                    requestId
+                                )
+
+                                Log.d(
+                                    "ReturnHome",
+                                    "귀가 요청 ACCEPTED 성공: $requestId"
+                                )
+
+                                onScreenChange(
+                                    AppScreen.COMPASS
+                                )
+
+                            }.onFailure { error ->
+                                Log.e("ReturnHome", "귀가 요청 수락 실패", error)
+                                Toast.makeText(
+                                    context,
+                                    "귀가 요청 수락에 실패했습니다.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                },
+
+                onDismissClick = {
+                    onScreenChange(AppScreen.HOME)
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 낙상 감지
+         * =================================================
+         */
+
+        AppScreen.FALL_DETECTED -> {
+
+            FallDetectScreen(
+
+
+                /*
+                 * -----------------------------------------
+                 * 괜찮아요
+                 * -----------------------------------------
+                 */
+                onOkayClick = {
+
+                    val locationSnapshot =
+                        watchLocation
+
+
+                    /*
+                     * 화면은 바로 홈으로
+                     */
+                    FallEventState
+                        .reset()
+
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+
+
+                    /*
+                     * 안전 확인 이벤트 저장
+                     */
+                    eventScope.launch {
+
+                        runCatching {
+
+                            watchSafetyEventManager
+                                .recordFallConfirmedSafe(
+                                    locationSnapshot
+                                )
+
+                        }.onFailure { error ->
+
+                            Log.w(
+                                "WatchSafetyEvent",
+                                "안전 확인 이벤트 저장 실패: ${error.message}",
+                                error
+                            )
+                        }
+                    }
+                },
+
+
+                /*
+                 * -----------------------------------------
+                 * 도와주세요
+                 * -----------------------------------------
+                 */
+                onHelpClick = {
+
+                    val locationSnapshot =
+                        watchLocation
+
+
+                    /*
+                     * 화면은 바로 SOS 완료로 이동
+                     */
+                    onScreenChange(
+                        AppScreen.SOS_SENT
+                    )
+
+
+                    eventScope.launch {
+
+
+                        /*
+                         * SOS 순간 GPS 강제 저장
+                         */
+                        if (
+                            locationSnapshot != null
+                        ) {
+
+                            runCatching {
+
+                                watchLocationSyncManager
+                                    .forceSync(
+                                        locationSnapshot
+                                    )
+
+                            }.onFailure { error ->
+
+                                Log.w(
+                                    "WatchSafetyEvent",
+                                    "SOS 위치 저장 실패: ${error.message}",
+                                    error
+                                )
+                            }
+                        }
+
+
+                        /*
+                         * 수동 SOS 이벤트
+                         */
+                        runCatching {
+
+                            watchSafetyEventManager
+                                .recordManualSos(
+                                    locationSnapshot
+                                )
+
+                        }.onFailure { error ->
+
+                            Log.w(
+                                "WatchSafetyEvent",
+                                "수동 SOS 저장 실패: ${error.message}",
+                                error
+                            )
+                        }
+                    }
+                },
+
+
+                /*
+                 * -----------------------------------------
+                 * 10초 무응답
+                 * -----------------------------------------
+                 */
+                onTimeout = {
+
+                    val locationSnapshot =
+                        watchLocation
+
+
+                    onScreenChange(
+                        AppScreen.SOS_SENT
+                    )
+
+
+                    eventScope.launch {
+
+
+                        /*
+                         * 자동 SOS 순간 GPS 강제 저장
+                         */
+                        if (
+                            locationSnapshot != null
+                        ) {
+
+                            runCatching {
+
+                                watchLocationSyncManager
+                                    .forceSync(
+                                        locationSnapshot
+                                    )
+
+                            }.onFailure { error ->
+
+                                Log.w(
+                                    "WatchSafetyEvent",
+                                    "자동 SOS 위치 저장 실패: ${error.message}",
+                                    error
+                                )
+                            }
+                        }
+
+
+                        /*
+                         * 자동 SOS 이벤트 저장
+                         */
+                        runCatching {
+
+                            watchSafetyEventManager
+                                .recordAutomaticSos(
+                                    locationSnapshot
+                                )
+
+                        }.onFailure { error ->
+
+                            Log.w(
+                                "WatchSafetyEvent",
+                                "자동 SOS 저장 실패: ${error.message}",
+                                error
+                            )
+                        }
+                    }
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * SOS 전송 완료
+         * =================================================
+         */
+
+        AppScreen.SOS_SENT -> {
+
+            SosSentScreen(
+
+                onReturnHome = {
+
+                    FallEventState
+                        .reset()
+
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 집으로 가기
+         * =================================================
+         */
+
+        AppScreen.COMPASS -> {
+
+            TmapRouteTestScreen(
+                returnHomeRequestId = returnHomeRequestId,
+                returnHomeRealtimeManager = returnHomeRealtimeManager,
+                guardianId = guardianId,
+                wearerId = wearerId,
+                homeLatitude = homeLatitude,
+                homeLongitude = homeLongitude
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 안전구역 이탈
+         * =================================================
+         */
+
+        AppScreen.OUT_OF_SAFE_ZONE -> {
+
+            OutOfSafeZoneScreen(
+
+                onGoHomeClick = {
+
+                    onClearReturnHomeRequest()
+
+                    onScreenChange(
+                        AppScreen.COMPASS
+                    )
+                },
+
+
+                onDismissClick = {
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                }
+            )
+        }
+
+
+        /*
+         * =================================================
+         * 복약 알림
+         * =================================================
+         */
+
+        AppScreen.MEDICATION_ALERT -> {
+
+            val sharedPref =
+                remember {
+
+                    context
+                        .getSharedPreferences(
+                            "WatchSafetyPrefs",
+                            Context.MODE_PRIVATE
+                        )
+                }
+
+
+            MedicationAlertScreen(
+
+                onTakenClick = {
+
+                    val currentDate =
+                        java.text
+                            .SimpleDateFormat(
+                                "yyyy-MM-dd",
+                                java.util.Locale
+                                    .getDefault()
+                            )
+                            .format(
+                                java.util.Date()
+                            )
+
+
+                    sharedPref
+                        .edit()
+                        .putBoolean(
+                            "isMedicationTaken",
+                            true
+                        )
+                        .putString(
+                            "lastTakenDate",
+                            currentDate
+                        )
+                        .apply()
+
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                },
+
+
+                onSnoozeClick = {
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                }
+            )
         }
     }
 }
-*/
+
 
 /*
- * =====================================================
- * 화면 전환
- * =====================================================
+ * =========================================================
+ * 보호자 귀가 요청 화면
+ * =========================================================
  */
 
-when (
-    currentScreen
+@Composable
+fun ReturnHomeRequestScreen(
+
+    onGoHomeClick:
+        () -> Unit,
+
+    onDismissClick:
+        () -> Unit
+
 ) {
 
+    val context =
+        LocalContext.current
 
-    /*
-     * -------------------------------------------------
-     * 홈
-     *
-     * 여기서 기존 MainScreen이 아니라
-     * 새 HomeScreen.kt를 사용
-     * -------------------------------------------------
-     */
+    val vibrator =
+        remember {
+            context.getSystemService(
+                Context.VIBRATOR_SERVICE
+            ) as android.os.Vibrator
+        }
 
-    AppScreen.HOME -> {
+    LaunchedEffect(Unit) {
+        val pattern =
+            longArrayOf(0, 350, 150, 350, 150, 600)
 
-        HomeScreen(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(
+                VibrationEffect.createWaveform(pattern, -1)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(pattern, -1)
+        }
+    }
 
-            guardianConnected =
-                guardianConnected,
-
-            onGoHomeClick = {
-
-                onScreenChange(
-                    AppScreen.COMPASS
-                )
-            },
-
-            onGuardianConnectClick = {
-
-                onScreenChange(
-                    AppScreen.PAIRING
-                )
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1976D2))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.Home,
+            contentDescription = "귀가 요청",
+            modifier = Modifier.size(36.dp),
+            tint = Color.White
         )
-    }
 
+        Spacer(modifier = Modifier.height(6.dp))
 
-    /*
-     * -------------------------------------------------
-     * 보호자 연결
-     * -------------------------------------------------
-     */
-
-    AppScreen.PAIRING -> {
-
-        PairingScreen(
-
-            pairingManager =
-                pairingManager,
-
-            onConnected = {
-
-                guardianConnected =
-                    true
-
-                onScreenChange(
-                    AppScreen.PAIRING_SUCCESS
-                )
-            }
+        Text(
+            text = "보호자가 귀가를\n요청했어요",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
-    }
 
+        Spacer(modifier = Modifier.height(14.dp))
 
-    /*
-     * -------------------------------------------------
-     * 연결 완료
-     * -------------------------------------------------
-     */
-
-    AppScreen.PAIRING_SUCCESS -> {
-
-        PairingSuccessScreen(
-
-            onFinished = {
-
-                onScreenChange(
-                    AppScreen.HOME
+        Button(
+            onClick = onGoHomeClick,
+            colors = ButtonDefaults.buttonColors(
+                backgroundColor = Color.White,
+                contentColor = Color(0xFF1976D2)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = "집으로 가기",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "집으로 가기",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
-        )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Button(
+            onClick = onDismissClick,
+            colors = ButtonDefaults.buttonColors(
+                backgroundColor = Color.DarkGray,
+                contentColor = Color.White
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+        ) {
+            Text(
+                text = "나중에",
+                fontSize = 12.sp
+            )
+        }
     }
-
-
-    /*
-     * -------------------------------------------------
-     * 낙상 감지
-     * -------------------------------------------------
-     */
-
-    AppScreen.FALL_DETECTED -> {
-
-        FallDetectScreen(
-
-            onOkayClick = {
-
-                FallEventState
-                    .reset()
-
-                onScreenChange(
-                    AppScreen.HOME
-                )
-            },
-
-            onHelpClick = {
-
-                onScreenChange(
-                    AppScreen.SOS_SENT
-                )
-            },
-
-            onTimeout = {
-
-                onScreenChange(
-                    AppScreen.SOS_SENT
-                )
-            }
-        )
-    }
-
-
-    /*
-     * -------------------------------------------------
-     * SOS 전송
-     * -------------------------------------------------
-     */
-
-    AppScreen.SOS_SENT -> {
-
-        SosSentScreen(
-
-            onReturnHome = {
-
-                FallEventState
-                    .reset()
-
-                onScreenChange(
-                    AppScreen.HOME
-                )
-            }
-        )
-    }
-
-
-    /*
-     * -------------------------------------------------
-     * 집으로 가기
-     * -------------------------------------------------
-     */
-
-    AppScreen.COMPASS -> {
-
-        TmapRouteTestScreen()
-    }
-
-
-    /*
-     * -------------------------------------------------
-     * 안전구역 이탈
-     * -------------------------------------------------
-     */
-
-    AppScreen.OUT_OF_SAFE_ZONE -> {
-
-        OutOfSafeZoneScreen(
-
-            onGoHomeClick = {
-
-                onScreenChange(
-                    AppScreen.COMPASS
-                )
-            },
-
-            onDismissClick = {
-
-                onScreenChange(
-                    AppScreen.HOME
-                )
-            }
-        )
-    }
-
-
-    /*
-     * -------------------------------------------------
-     * 복약 알림
-     * -------------------------------------------------
-     */
-
-    AppScreen.MEDICATION_ALERT -> {
-
-        val sharedPref =
-            remember {
-
-                context
-                    .getSharedPreferences(
-                        "WatchSafetyPrefs",
-                        Context.MODE_PRIVATE
-                    )
-            }
-
-
-        MedicationAlertScreen(
-
-            onTakenClick = {
-
-                val currentDate =
-                    java.text
-                        .SimpleDateFormat(
-                            "yyyy-MM-dd",
-                            java.util.Locale
-                                .getDefault()
-                        )
-                        .format(
-                            java.util.Date()
-                        )
-
-
-                sharedPref
-                    .edit()
-                    .putBoolean(
-                        "isMedicationTaken",
-                        true
-                    )
-                    .putString(
-                        "lastTakenDate",
-                        currentDate
-                    )
-                    .apply()
-
-
-                onScreenChange(
-                    AppScreen.HOME
-                )
-            },
-
-            onSnoozeClick = {
-
-                onScreenChange(
-                    AppScreen.HOME
-                )
-            }
-        )
-    }
-}
 }
 
 
 /*
-* =========================================================
-*
-* 안전구역 이탈 화면
-*
-* =========================================================
-*/
+ * =========================================================
+ * 안전구역 이탈 화면
+ * =========================================================
+ */
 
 @Composable
 fun OutOfSafeZoneScreen(
 
-onGoHomeClick:
-    () -> Unit,
+    onGoHomeClick:
+        () -> Unit,
 
-onDismissClick:
-    () -> Unit
-
-) {
-
-Column(
-
-    modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Color(
-                0xFFE64A19
-            )
-        )
-        .padding(
-            16.dp
-        ),
-
-    verticalArrangement =
-        Arrangement.Center,
-
-    horizontalAlignment =
-        Alignment.CenterHorizontally
+    onDismissClick:
+        () -> Unit
 
 ) {
 
-    Icon(
-
-        imageVector =
-            Icons.Default.LocationOff,
-
-        contentDescription =
-            "경로 이탈",
+    Column(
 
         modifier =
-            Modifier.size(
-                36.dp
-            ),
-
-        tint =
-            Color.White
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                4.dp
-            )
-    )
-
-
-    Text(
-
-        text =
-            "안전구역을 벗어났습니다!",
-
-        color =
-            Color.White,
-
-        fontSize =
-            14.sp,
-
-        fontWeight =
-            FontWeight.Bold
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                16.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onGoHomeClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color.White,
-
-                    contentColor =
-                        Color(
-                            0xFFE64A19
-                        )
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                40.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically
-
-        ) {
-
-            Icon(
-
-                imageVector =
-                    Icons.Default.Home,
-
-                contentDescription =
-                    "집으로",
-
-                modifier =
-                    Modifier.size(
-                        16.dp
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFFE64A19
                     )
-            )
-
-
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
-
-
-            Text(
-
-                text =
-                    "집으로 안내받기",
-
-                fontSize =
-                    14.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
-    }
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                8.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onDismissClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color.DarkGray,
-
-                    contentColor =
-                        Color.White
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                32.dp
-            )
-
-    ) {
-
-        Text(
-
-            text =
-                "괜찮아요 (알림 닫기)",
-
-            fontSize =
-                12.sp
-        )
-    }
-}
-}
-
-
-/*
-* =========================================================
-*
-* 낙상 감지 화면
-*
-* =========================================================
-*/
-
-@Composable
-fun FallDetectScreen(
-
-onOkayClick:
-    () -> Unit,
-
-onHelpClick:
-    () -> Unit,
-
-onTimeout:
-    () -> Unit
-
-) {
-
-var timeLeft by
-remember {
-
-    mutableStateOf(
-        10
-    )
-}
-
-
-LaunchedEffect(
-    timeLeft
-) {
-
-    if (
-        timeLeft > 0
-    ) {
-
-        delay(
-            1000L
-        )
-
-        timeLeft--
-
-    } else {
-
-        onTimeout()
-    }
-}
-
-
-Column(
-
-    modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Color(
-                0xFFFF9800
-            )
-        )
-        .padding(
-            horizontal =
-                16.dp
-        ),
-
-    verticalArrangement =
-        Arrangement.Center,
-
-    horizontalAlignment =
-        Alignment.CenterHorizontally
-
-) {
-
-    Text(
-
-        text =
-            "${timeLeft}초 후 구조 요청",
-
-        color =
-            Color.White,
-
-        fontSize =
-            16.sp,
-
-        fontWeight =
-            FontWeight.Bold
-    )
-
-
-    Text(
-
-        text =
-            "괜찮으신가요?",
-
-        color =
-            Color.White,
-
-        fontSize =
-            18.sp,
-
-        fontWeight =
-            FontWeight.Bold
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                8.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onOkayClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color(
-                            0xFF4CAF50
-                        ),
-
-                    contentColor =
-                        Color.White
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                40.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically,
-
-            horizontalArrangement =
-                Arrangement.Center
-
-        ) {
-
-            Icon(
-
-                imageVector =
-                    Icons.Default.Check,
-
-                contentDescription =
-                    "괜찮아요",
-
-                modifier =
-                    Modifier.size(
-                        16.dp
-                    )
-            )
-
-
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
-
-
-            Text(
-
-                text =
-                    "괜찮아요",
-
-                fontSize =
-                    14.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
-    }
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                4.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onHelpClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color(
-                            0xFFD32F2F
-                        ),
-
-                    contentColor =
-                        Color.White
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                40.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically,
-
-            horizontalArrangement =
-                Arrangement.Center
-
-        ) {
-
-            Icon(
-
-                imageVector =
-                    Icons.Default.Warning,
-
-                contentDescription =
-                    "도와주세요",
-
-                modifier =
-                    Modifier.size(
-                        16.dp
-                    )
-            )
-
-
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
-
-
-            Text(
-
-                text =
-                    "도와주세요!",
-
-                fontSize =
-                    14.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
-    }
-}
-}
-
-
-/*
-* =========================================================
-*
-* SOS 전송 완료
-*
-* =========================================================
-*/
-
-@Composable
-fun SosSentScreen(
-
-onReturnHome:
-    () -> Unit
-
-) {
-
-Column(
-
-    modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Color(
-                0xFFD32F2F
-            )
-        )
-        .padding(
-            horizontal =
-                16.dp
-        ),
-
-    verticalArrangement =
-        Arrangement.Center,
-
-    horizontalAlignment =
-        Alignment.CenterHorizontally
-
-) {
-
-    Icon(
-
-        imageVector =
-            Icons.Default.Call,
-
-        contentDescription =
-            "전송 완료",
-
-        modifier =
-            Modifier.size(
-                40.dp
-            ),
-
-        tint =
-            Color.White
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                4.dp
-            )
-    )
-
-
-    Text(
-
-        text =
-            "보호자에게 구조를\n요청했습니다.",
-
-        color =
-            Color.White,
-
-        fontSize =
-            16.sp,
-
-        fontWeight =
-            FontWeight.Bold,
-
-        textAlign =
-            TextAlign.Center
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                8.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onReturnHome,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color.White,
-
-                    contentColor =
-                        Color.Black
-                ),
-
-        modifier =
-            Modifier.height(
-                32.dp
-            )
-
-    ) {
-
-        Text(
-
-            text =
-                "확인",
-
-            fontSize =
-                12.sp
-        )
-    }
-}
-}
-
-
-/*
-* =========================================================
-*
-* 기존 Compass 화면
-*
-* 현재 AppScreen.COMPASS에서는 TmapRouteTestScreen을 사용하지만
-* 필요해서 기존 코드는 유지.
-*
-* =========================================================
-*/
-
-@Composable
-fun CompassScreen(
-
-myLocation:
-Location?,
-
-homeLocation:
-Location,
-
-onCloseClick:
-    () -> Unit
-
-) {
-
-val context =
-    LocalContext.current
-
-
-var routeResult by
-remember {
-
-    mutableStateOf<
-            TmapRouteResult?
-            >(
-        null
-    )
-}
-
-
-var isRouting by
-remember {
-
-    mutableStateOf(
-        false
-    )
-}
-
-
-val tmapClient =
-    remember {
-
-        TmapRouteClient()
-    }
-
-
-LaunchedEffect(
-    myLocation
-) {
-
-    if (
-        myLocation != null &&
-        routeResult == null &&
-        !isRouting
-    ) {
-
-        isRouting =
-            true
-
-
-        try {
-
-            routeResult =
-                tmapClient
-                    .getPedestrianRoute(
-
-                        startLongitude =
-                            myLocation.longitude,
-
-                        startLatitude =
-                            myLocation.latitude,
-
-                        endLongitude =
-                            homeLocation.longitude,
-
-                        endLatitude =
-                            homeLocation.latitude
-                    )
-
-        } catch (
-            e: Exception
-        ) {
-
-            Toast
-                .makeText(
-                    context,
-                    "경로 탐색 실패",
-                    Toast.LENGTH_SHORT
                 )
-                .show()
+                .padding(
+                    16.dp
+                ),
 
-        } finally {
+        verticalArrangement =
+            Arrangement.Center,
 
-            isRouting =
-                false
-        }
-    }
-}
+        horizontalAlignment =
+            Alignment.CenterHorizontally
 
+    ) {
 
-Column(
+        Icon(
 
-    modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Color(
-                0xFF1976D2
-            )
+            imageVector =
+                Icons.Default.LocationOff,
+
+            contentDescription =
+                "경로 이탈",
+
+            modifier =
+                Modifier.size(
+                    36.dp
+                ),
+
+            tint =
+                Color.White
         )
-        .padding(
-            16.dp
-        ),
-
-    verticalArrangement =
-        Arrangement.Center,
-
-    horizontalAlignment =
-        Alignment.CenterHorizontally
-
-) {
-
-    Text(
-
-        text =
-            "T맵 도보 길안내",
-
-        color =
-            Color.White,
-
-        fontSize =
-            14.sp,
-
-        fontWeight =
-            FontWeight.Bold
-    )
 
 
-    Spacer(
-        modifier =
-            Modifier.height(
-                12.dp
-            )
-    )
+        Spacer(
+            modifier =
+                Modifier.height(
+                    4.dp
+                )
+        )
 
 
-    when {
+        Text(
 
-        myLocation == null -> {
+            text =
+                "안전구역을 벗어났습니다!",
 
-            Text(
+            color =
+                Color.White,
 
-                text =
-                    "GPS 위치 탐색중...",
+            fontSize =
+                14.sp,
 
-                color =
-                    Color.White,
-
-                fontSize =
-                    12.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
+            fontWeight =
+                FontWeight.Bold
+        )
 
 
-        isRouting -> {
-
-            Text(
-
-                text =
-                    "경로 탐색 중...",
-
-                color =
-                    Color.Yellow,
-
-                fontSize =
-                    12.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
+        Spacer(
+            modifier =
+                Modifier.height(
+                    16.dp
+                )
+        )
 
 
-        routeResult != null -> {
+        Button(
 
-            val result =
-                routeResult!!
+            onClick =
+                onGoHomeClick,
 
+            colors =
+                ButtonDefaults
+                    .buttonColors(
 
-            Text(
+                        backgroundColor =
+                            Color.White,
 
-                text =
-                    "남은 거리: ${result.totalDistanceMeters}m",
+                        contentColor =
+                            Color(
+                                0xFFE64A19
+                            )
+                    ),
 
-                color =
-                    Color.Yellow,
-
-                fontSize =
-                    16.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-
-
-            Spacer(
-                modifier =
-                    Modifier.height(
-                        2.dp
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        40.dp
                     )
-            )
 
+        ) {
 
-            Text(
+            Row(
 
-                text =
-                    "예상 시간: ${result.totalTimeSeconds / 60}분",
+                verticalAlignment =
+                    Alignment.CenterVertically
 
-                color =
-                    Color.White,
-
-                fontSize =
-                    12.sp
-            )
-
-
-            val nextStep =
-                result.steps
-                    .firstOrNull {
-
-                        it.description
-                            .isNotBlank()
-                    }
-
-
-            if (
-                nextStep != null
             ) {
+
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Home,
+
+                    contentDescription =
+                        "집으로",
+
+                    modifier =
+                        Modifier.size(
+                            16.dp
+                        )
+                )
+
 
                 Spacer(
                     modifier =
-                        Modifier.height(
-                            8.dp
+                        Modifier.width(
+                            4.dp
                         )
                 )
 
@@ -1918,414 +2289,1118 @@ Column(
                 Text(
 
                     text =
-                        "▶ ${nextStep.description}",
-
-                    color =
-                        Color.White,
+                        "집으로 안내받기",
 
                     fontSize =
-                        11.sp,
+                        14.sp,
 
-                    textAlign =
-                        TextAlign.Center
+                    fontWeight =
+                        FontWeight.Bold
                 )
             }
         }
 
 
-        else -> {
+        Spacer(
+            modifier =
+                Modifier.height(
+                    8.dp
+                )
+        )
+
+
+        Button(
+
+            onClick =
+                onDismissClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color.DarkGray,
+
+                        contentColor =
+                            Color.White
+                    ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        32.dp
+                    )
+
+        ) {
 
             Text(
 
                 text =
-                    "경로를 찾을 수 없습니다.",
-
-                color =
-                    Color.White,
+                    "괜찮아요 (알림 닫기)",
 
                 fontSize =
                     12.sp
             )
         }
     }
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                16.dp
-            )
-    )
-
-
-    Button(
-
-        onClick =
-            onCloseClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color.White,
-
-                    contentColor =
-                        Color(
-                            0xFF1976D2
-                        )
-                ),
-
-        modifier =
-            Modifier.height(
-                28.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically
-
-        ) {
-
-            Icon(
-
-                imageVector =
-                    Icons.Default.Close,
-
-                contentDescription =
-                    "안내 종료",
-
-                modifier =
-                    Modifier.size(
-                        12.dp
-                    )
-            )
-
-
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
-
-
-            Text(
-
-                text =
-                    "안내 종료",
-
-                fontSize =
-                    11.sp,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-        }
-    }
-}
 }
 
 
 /*
-* =========================================================
-*
-* 복약 알림 화면
-*
-* =========================================================
-*/
+ * =========================================================
+ * 낙상 감지 화면
+ * =========================================================
+ */
+
+@Composable
+fun FallDetectScreen(
+
+    onOkayClick:
+        () -> Unit,
+
+    onHelpClick:
+        () -> Unit,
+
+    onTimeout:
+        () -> Unit
+
+) {
+
+    var timeLeft by
+    remember {
+
+        mutableStateOf(
+            10
+        )
+    }
+
+
+    LaunchedEffect(
+        timeLeft
+    ) {
+
+        if (
+            timeLeft > 0
+        ) {
+
+            delay(
+                1000L
+            )
+
+            timeLeft--
+
+        } else {
+
+            onTimeout()
+        }
+    }
+
+
+    Column(
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFFFF9800
+                    )
+                )
+                .padding(
+                    horizontal =
+                        16.dp
+                ),
+
+        verticalArrangement =
+            Arrangement.Center,
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+
+    ) {
+
+        Text(
+
+            text =
+                "${timeLeft}초 후 구조 요청",
+
+            color =
+                Color.White,
+
+            fontSize =
+                16.sp,
+
+            fontWeight =
+                FontWeight.Bold
+        )
+
+
+        Text(
+
+            text =
+                "괜찮으신가요?",
+
+            color =
+                Color.White,
+
+            fontSize =
+                18.sp,
+
+            fontWeight =
+                FontWeight.Bold
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    8.dp
+                )
+        )
+
+
+        Button(
+
+            onClick =
+                onOkayClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color(
+                                0xFF4CAF50
+                            ),
+
+                        contentColor =
+                            Color.White
+                    ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        40.dp
+                    )
+
+        ) {
+
+            Row(
+
+                verticalAlignment =
+                    Alignment.CenterVertically,
+
+                horizontalArrangement =
+                    Arrangement.Center
+
+            ) {
+
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Check,
+
+                    contentDescription =
+                        "괜찮아요",
+
+                    modifier =
+                        Modifier.size(
+                            16.dp
+                        )
+                )
+
+
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
+
+
+                Text(
+
+                    text =
+                        "괜찮아요",
+
+                    fontSize =
+                        14.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
+        }
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    4.dp
+                )
+        )
+
+
+        Button(
+
+            onClick =
+                onHelpClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color(
+                                0xFFD32F2F
+                            ),
+
+                        contentColor =
+                            Color.White
+                    ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        40.dp
+                    )
+
+        ) {
+
+            Row(
+
+                verticalAlignment =
+                    Alignment.CenterVertically,
+
+                horizontalArrangement =
+                    Arrangement.Center
+
+            ) {
+
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Warning,
+
+                    contentDescription =
+                        "도와주세요",
+
+                    modifier =
+                        Modifier.size(
+                            16.dp
+                        )
+                )
+
+
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
+
+
+                Text(
+
+                    text =
+                        "도와주세요!",
+
+                    fontSize =
+                        14.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+
+/*
+ * =========================================================
+ * SOS 전송 완료
+ * =========================================================
+ */
+
+@Composable
+fun SosSentScreen(
+
+    onReturnHome:
+        () -> Unit
+
+) {
+
+    Column(
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFFD32F2F
+                    )
+                )
+                .padding(
+                    horizontal =
+                        16.dp
+                ),
+
+        verticalArrangement =
+            Arrangement.Center,
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+
+    ) {
+
+        Icon(
+
+            imageVector =
+                Icons.Default.Call,
+
+            contentDescription =
+                "전송 완료",
+
+            modifier =
+                Modifier.size(
+                    40.dp
+                ),
+
+            tint =
+                Color.White
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    4.dp
+                )
+        )
+
+
+        Text(
+
+            text =
+                "보호자에게 구조를\n요청했습니다.",
+
+            color =
+                Color.White,
+
+            fontSize =
+                16.sp,
+
+            fontWeight =
+                FontWeight.Bold,
+
+            textAlign =
+                TextAlign.Center
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    8.dp
+                )
+        )
+
+
+        Button(
+
+            onClick =
+                onReturnHome,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color.White,
+
+                        contentColor =
+                            Color.Black
+                    ),
+
+            modifier =
+                Modifier.height(
+                    32.dp
+                )
+
+        ) {
+
+            Text(
+
+                text =
+                    "확인",
+
+                fontSize =
+                    12.sp
+            )
+        }
+    }
+}
+
+
+/*
+ * =========================================================
+ * 기존 Compass 화면
+ * =========================================================
+ */
+
+@Composable
+fun CompassScreen(
+
+    myLocation:
+    Location?,
+
+    homeLocation:
+    Location,
+
+    onCloseClick:
+        () -> Unit
+
+) {
+
+    val context =
+        LocalContext.current
+
+
+    var routeResult by
+    remember {
+
+        mutableStateOf<TmapRouteResult?>(
+            null
+        )
+    }
+
+
+    var isRouting by
+    remember {
+
+        mutableStateOf(
+            false
+        )
+    }
+
+
+    val tmapClient =
+        remember {
+
+            TmapRouteClient()
+        }
+
+
+    LaunchedEffect(
+        myLocation
+    ) {
+
+        if (
+            myLocation != null &&
+            routeResult == null &&
+            !isRouting
+        ) {
+
+            isRouting =
+                true
+
+
+            try {
+
+                routeResult =
+                    tmapClient
+                        .getPedestrianRoute(
+
+                            startLongitude =
+                                myLocation.longitude,
+
+                            startLatitude =
+                                myLocation.latitude,
+
+                            endLongitude =
+                                homeLocation.longitude,
+
+                            endLatitude =
+                                homeLocation.latitude
+                        )
+
+            } catch (
+                e: Exception
+            ) {
+
+                Toast
+                    .makeText(
+                        context,
+                        "경로 탐색 실패",
+                        Toast.LENGTH_SHORT
+                    )
+                    .show()
+
+            } finally {
+
+                isRouting =
+                    false
+            }
+        }
+    }
+
+
+    Column(
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFF1976D2
+                    )
+                )
+                .padding(
+                    16.dp
+                ),
+
+        verticalArrangement =
+            Arrangement.Center,
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+
+    ) {
+
+        Text(
+
+            text =
+                "T맵 도보 길안내",
+
+            color =
+                Color.White,
+
+            fontSize =
+                14.sp,
+
+            fontWeight =
+                FontWeight.Bold
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    12.dp
+                )
+        )
+
+
+        when {
+
+
+            myLocation == null -> {
+
+                Text(
+
+                    text =
+                        "GPS 위치 탐색중...",
+
+                    color =
+                        Color.White,
+
+                    fontSize =
+                        12.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
+
+
+            isRouting -> {
+
+                Text(
+
+                    text =
+                        "경로 탐색 중...",
+
+                    color =
+                        Color.Yellow,
+
+                    fontSize =
+                        12.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
+
+
+            routeResult != null -> {
+
+                val result =
+                    routeResult!!
+
+
+                Text(
+
+                    text =
+                        "남은 거리: ${result.totalDistanceMeters}m",
+
+                    color =
+                        Color.Yellow,
+
+                    fontSize =
+                        16.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            2.dp
+                        )
+                )
+
+
+                Text(
+
+                    text =
+                        "예상 시간: ${result.totalTimeSeconds / 60}분",
+
+                    color =
+                        Color.White,
+
+                    fontSize =
+                        12.sp
+                )
+
+
+                val nextStep =
+                    result.steps
+                        .firstOrNull {
+
+                            it.description
+                                .isNotBlank()
+                        }
+
+
+                if (
+                    nextStep != null
+                ) {
+
+                    Spacer(
+                        modifier =
+                            Modifier.height(
+                                8.dp
+                            )
+                    )
+
+
+                    Text(
+
+                        text =
+                            "▶ ${nextStep.description}",
+
+                        color =
+                            Color.White,
+
+                        fontSize =
+                            11.sp,
+
+                        textAlign =
+                            TextAlign.Center
+                    )
+                }
+            }
+
+
+            else -> {
+
+                Text(
+
+                    text =
+                        "경로를 찾을 수 없습니다.",
+
+                    color =
+                        Color.White,
+
+                    fontSize =
+                        12.sp
+                )
+            }
+        }
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    16.dp
+                )
+        )
+
+
+        Button(
+
+            onClick =
+                onCloseClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color.White,
+
+                        contentColor =
+                            Color(
+                                0xFF1976D2
+                            )
+                    ),
+
+            modifier =
+                Modifier.height(
+                    28.dp
+                )
+
+        ) {
+
+            Row(
+
+                verticalAlignment =
+                    Alignment.CenterVertically
+
+            ) {
+
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Close,
+
+                    contentDescription =
+                        "안내 종료",
+
+                    modifier =
+                        Modifier.size(
+                            12.dp
+                        )
+                )
+
+
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
+
+
+                Text(
+
+                    text =
+                        "안내 종료",
+
+                    fontSize =
+                        11.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+
+/*
+ * =========================================================
+ * 복약 알림
+ * =========================================================
+ */
 
 @Composable
 fun MedicationAlertScreen(
 
-onTakenClick:
-    () -> Unit,
+    onTakenClick:
+        () -> Unit,
 
-onSnoozeClick:
-    () -> Unit
+    onSnoozeClick:
+        () -> Unit
 
 ) {
 
-val context =
-    LocalContext.current
+    val context =
+        LocalContext.current
 
 
-val vibrator =
-    remember {
+    val vibrator =
+        remember {
 
-        context
-            .getSystemService(
-                Context.VIBRATOR_SERVICE
-            ) as android.os.Vibrator
+            context
+                .getSystemService(
+                    Context.VIBRATOR_SERVICE
+                ) as android.os.Vibrator
+        }
+
+
+    LaunchedEffect(
+        Unit
+    ) {
+
+        val pattern =
+            longArrayOf(
+                0,
+                500,
+                200,
+                500
+            )
+
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
+
+            vibrator.vibrate(
+
+                VibrationEffect
+                    .createWaveform(
+                        pattern,
+                        -1
+                    )
+            )
+
+        } else {
+
+            @Suppress("DEPRECATION")
+
+            vibrator.vibrate(
+                pattern,
+                -1
+            )
+        }
     }
 
 
-/*
- * 화면 표시 직후 진동
- */
-LaunchedEffect(
-    Unit
-) {
+    Column(
 
-    val pattern =
-        longArrayOf(
-            0,
-            500,
-            200,
-            500
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFF1976D2
+                    )
+                )
+                .padding(
+                    16.dp
+                ),
+
+        verticalArrangement =
+            Arrangement.Center,
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+
+    ) {
+
+        Icon(
+
+            imageVector =
+                Icons.Default.Notifications,
+
+            contentDescription =
+                "약 알림",
+
+            modifier =
+                Modifier.size(
+                    36.dp
+                ),
+
+            tint =
+                Color.Yellow
         )
 
 
-    if (
-        Build.VERSION.SDK_INT >=
-        Build.VERSION_CODES.O
-    ) {
-
-        vibrator.vibrate(
-
-            VibrationEffect
-                .createWaveform(
-                    pattern,
-                    -1
+        Spacer(
+            modifier =
+                Modifier.height(
+                    4.dp
                 )
         )
 
-    } else {
 
-        @Suppress("DEPRECATION")
+        Text(
 
-        vibrator.vibrate(
-            pattern,
-            -1
+            text =
+                "약 드실 시간입니다!",
+
+            color =
+                Color.White,
+
+            fontSize =
+                16.sp,
+
+            fontWeight =
+                FontWeight.Bold
         )
-    }
-}
 
 
-Column(
-
-    modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Color(
-                0xFF1976D2
-            )
+        Spacer(
+            modifier =
+                Modifier.height(
+                    16.dp
+                )
         )
-        .padding(
-            16.dp
-        ),
-
-    verticalArrangement =
-        Arrangement.Center,
-
-    horizontalAlignment =
-        Alignment.CenterHorizontally
-
-) {
-
-    Icon(
-
-        imageVector =
-            Icons.Default.Notifications,
-
-        contentDescription =
-            "약 알림",
-
-        modifier =
-            Modifier.size(
-                36.dp
-            ),
-
-        tint =
-            Color.Yellow
-    )
 
 
-    Spacer(
-        modifier =
-            Modifier.height(
-                4.dp
-            )
-    )
+        Button(
 
+            onClick =
+                onTakenClick,
 
-    Text(
+            colors =
+                ButtonDefaults
+                    .buttonColors(
 
-        text =
-            "약 드실 시간입니다!",
+                        backgroundColor =
+                            Color(
+                                0xFF4CAF50
+                            ),
 
-        color =
-            Color.White,
+                        contentColor =
+                            Color.White
+                    ),
 
-        fontSize =
-            16.sp,
-
-        fontWeight =
-            FontWeight.Bold
-    )
-
-
-    Spacer(
-        modifier =
-            Modifier.height(
-                16.dp
-            )
-    )
-
-
-    /*
-     * 먹었어요
-     */
-
-    Button(
-
-        onClick =
-            onTakenClick,
-
-        colors =
-            ButtonDefaults
-                .buttonColors(
-
-                    backgroundColor =
-                        Color(
-                            0xFF4CAF50
-                        ),
-
-                    contentColor =
-                        Color.White
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                36.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        36.dp
+                    )
 
         ) {
 
-            Icon(
+            Row(
 
-                imageVector =
-                    Icons.Default.Check,
+                verticalAlignment =
+                    Alignment.CenterVertically
 
-                contentDescription =
-                    "먹음",
+            ) {
 
-                modifier =
-                    Modifier.size(
-                        16.dp
-                    )
-            )
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Check,
+
+                    contentDescription =
+                        "먹음",
+
+                    modifier =
+                        Modifier.size(
+                            16.dp
+                        )
+                )
 
 
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
 
 
-            Text(
+                Text(
 
-                text =
-                    "지금 먹었어요!",
+                    text =
+                        "지금 먹었어요!",
 
-                fontSize =
-                    13.sp,
+                    fontSize =
+                        13.sp,
 
-                fontWeight =
-                    FontWeight.Bold
-            )
+                    fontWeight =
+                        FontWeight.Bold
+                )
+            }
         }
-    }
 
 
-    Spacer(
-        modifier =
-            Modifier.height(
-                8.dp
-            )
-    )
+        Spacer(
+            modifier =
+                Modifier.height(
+                    8.dp
+                )
+        )
 
 
-    /*
-     * 10분 뒤
-     */
+        Button(
 
-    Button(
+            onClick =
+                onSnoozeClick,
 
-        onClick =
-            onSnoozeClick,
+            colors =
+                ButtonDefaults
+                    .buttonColors(
 
-        colors =
-            ButtonDefaults
-                .buttonColors(
+                        backgroundColor =
+                            Color.DarkGray,
 
-                    backgroundColor =
-                        Color.DarkGray,
+                        contentColor =
+                            Color.White
+                    ),
 
-                    contentColor =
-                        Color.White
-                ),
-
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(
-                28.dp
-            )
-
-    ) {
-
-        Row(
-
-            verticalAlignment =
-                Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        28.dp
+                    )
 
         ) {
 
-            Icon(
+            Row(
 
-                imageVector =
-                    Icons.Default.Close,
+                verticalAlignment =
+                    Alignment.CenterVertically
 
-                contentDescription =
-                    "나중에",
+            ) {
 
-                modifier =
-                    Modifier.size(
-                        12.dp
-                    )
-            )
+                Icon(
+
+                    imageVector =
+                        Icons.Default.Close,
+
+                    contentDescription =
+                        "나중에",
+
+                    modifier =
+                        Modifier.size(
+                            12.dp
+                        )
+                )
 
 
-            Spacer(
-                modifier =
-                    Modifier.width(
-                        4.dp
-                    )
-            )
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
 
 
-            Text(
+                Text(
 
-                text =
-                    "10분 뒤에 다시",
+                    text =
+                        "10분 뒤에 다시",
 
-                fontSize =
-                    11.sp
-            )
+                    fontSize =
+                        11.sp
+                )
+            }
         }
     }
-}
 }

@@ -1,10 +1,16 @@
 package com.watchsafety.guardian.ui
 
+import android.util.Log
+
 import androidx.compose.foundation.layout.padding
+
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+
 import androidx.compose.ui.Modifier
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -19,7 +25,16 @@ import com.watchsafety.guardian.navigation.GuardianRoute
 
 
 @Composable
-fun GuardianApp() {
+fun GuardianApp(
+
+    /*
+     * MainActivity에서 FCM 알림 클릭을 감지하면
+     * 값이 증가한다.
+     */
+
+    emergencyRequestVersion:
+    Long = 0L,
+) {
 
 
     /*
@@ -42,6 +57,7 @@ fun GuardianApp() {
             GuardianViewModel =
 
         viewModel(
+
             factory =
                 GuardianViewModel
                     .factory()
@@ -49,8 +65,11 @@ fun GuardianApp() {
 
 
     /*
-     * 기존 전체 상태
+     * =====================================================
+     * 메인 상태
+     * =====================================================
      */
+
     val uiState by
     guardianViewModel
         .uiState
@@ -58,8 +77,11 @@ fun GuardianApp() {
 
 
     /*
-     * 워치 연결 상태
+     * =====================================================
+     * 워치 페어링 상태
+     * =====================================================
      */
+
     val pairingState by
     guardianViewModel
         .pairingUiState
@@ -68,11 +90,174 @@ fun GuardianApp() {
 
     /*
      * =====================================================
-     * 현재 화면
+     * Realtime SOS
+     * =====================================================
+     *
+     * 보호자 앱 프로세스가 살아있는 상태에서
+     * Supabase Realtime으로 SOS를 받으면
+     * 즉시 긴급화면으로 이동한다.
+     */
+
+    LaunchedEffect(
+        guardianViewModel
+    ) {
+
+        guardianViewModel
+            .newSosEvent
+            .collect {
+
+
+                Log.d(
+                    NAVIGATION_TAG,
+                    "🚨 Realtime SOS 이벤트 수신"
+                )
+
+
+                val currentDestination =
+
+                    navController
+                        .currentBackStackEntry
+                        ?.destination
+                        ?.route
+
+
+                Log.d(
+                    NAVIGATION_TAG,
+                    "현재 화면=$currentDestination"
+                )
+
+
+                /*
+                 * 이미 긴급 화면이면
+                 * 다시 이동하지 않음
+                 */
+                if (
+                    currentDestination ==
+                    GuardianRoute.EMERGENCY
+                ) {
+
+                    return@collect
+                }
+
+
+                navController
+                    .navigate(
+                        GuardianRoute.EMERGENCY
+                    ) {
+
+                        launchSingleTop =
+                            true
+                    }
+
+
+                Log.d(
+                    NAVIGATION_TAG,
+                    "🚨 Realtime → EMERGENCY 이동 완료"
+                )
+            }
+    }
+
+
+    /*
+     * =====================================================
+     * FCM Push 클릭
+     * =====================================================
+     *
+     * 앱 백그라운드 또는 종료 상태에서
+     * FCM 알림을 사용자가 누르면
+     *
+     * MainActivity
+     *     ↓
+     * emergencyRequestVersion 증가
+     *     ↓
+     * 여기서 감지
+     *     ↓
+     * EMERGENCY
+     */
+
+    LaunchedEffect(
+        emergencyRequestVersion
+    ) {
+
+
+        /*
+         * 0은 일반 앱 실행
+         */
+        if (
+            emergencyRequestVersion <= 0L
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        Log.d(
+            NAVIGATION_TAG,
+            "🚨 Push 클릭 화면전환 요청 version=$emergencyRequestVersion"
+        )
+
+
+        val currentDestination =
+
+            navController
+                .currentBackStackEntry
+                ?.destination
+                ?.route
+
+
+        Log.d(
+            NAVIGATION_TAG,
+            "Push 클릭 당시 화면=$currentDestination"
+        )
+
+
+        /*
+         * 이미 Emergency면 중복 이동 방지
+         */
+        if (
+            currentDestination ==
+            GuardianRoute.EMERGENCY
+        ) {
+
+            Log.d(
+                NAVIGATION_TAG,
+                "이미 EMERGENCY 화면"
+            )
+
+
+            return@LaunchedEffect
+        }
+
+
+        /*
+         * 긴급화면 이동
+         */
+
+        navController
+            .navigate(
+                GuardianRoute.EMERGENCY
+            ) {
+
+                launchSingleTop =
+                    true
+            }
+
+
+        Log.d(
+            NAVIGATION_TAG,
+            "🚨 Push 클릭 → EMERGENCY 이동 완료"
+        )
+    }
+
+
+    /*
+     * =====================================================
+     * 현재 Route
      * =====================================================
      */
 
     val currentRoute =
+
         navController
             .currentBackStackEntryAsState()
             .value
@@ -81,19 +266,23 @@ fun GuardianApp() {
 
 
     /*
-     * 안전구역 화면에서는
-     * 기존처럼 홈 탭 선택 상태 유지
+     * =====================================================
+     * BottomBar 선택 상태
+     * =====================================================
      */
+
     val bottomBarRoute =
 
         when (
             currentRoute
         ) {
 
+
             GuardianRoute.SAFE_ZONES -> {
 
                 GuardianRoute.HOME
             }
+
 
             else -> {
 
@@ -103,9 +292,11 @@ fun GuardianApp() {
 
 
     /*
-     * 워치 연결 화면에서는
-     * BottomBar를 숨긴다.
+     * =====================================================
+     * BottomBar 표시 여부
+     * =====================================================
      */
+
     val showBottomBar =
 
         currentRoute in
@@ -123,11 +314,12 @@ fun GuardianApp() {
 
     /*
      * =====================================================
-     * 앱 Scaffold
+     * Scaffold
      * =====================================================
      */
 
     Scaffold(
+
 
         containerColor =
             MaterialTheme
@@ -135,16 +327,26 @@ fun GuardianApp() {
                 .background,
 
 
+        /*
+         * =================================================
+         * BottomBar
+         * =================================================
+         */
+
         bottomBar = {
+
 
             if (
                 showBottomBar
             ) {
 
+
                 GuardianBottomBar(
+
 
                     currentRoute =
                         bottomBarRoute,
+
 
                     onDestinationSelected = {
                             destination ->
@@ -157,10 +359,13 @@ fun GuardianApp() {
 
 
                                 popUpTo(
+
                                     navController
                                         .graph
                                         .startDestinationId
+
                                 ) {
+
 
                                     saveState =
                                         true
@@ -190,38 +395,54 @@ fun GuardianApp() {
 
         GuardianNavGraph(
 
+
             navController =
                 navController,
 
 
-            /*
-             * 메인 상태
-             */
             snapshot =
                 uiState.snapshot,
+
 
             isRefreshing =
                 uiState.isRefreshing,
 
 
             /*
-             * 기존 기능
+             * 상태 새로고침
              */
+
             onRefreshStatus =
                 guardianViewModel::
                 refreshStatus,
+
+
+            /*
+             * 귀가 요청
+             */
 
             onReturnHomeRequest =
                 guardianViewModel::
                 sendReturnHomeRequest,
 
+
+            /*
+             * 안전구역
+             */
+
             onSafeZoneEnabledChange =
                 guardianViewModel::
                 setSafeZoneEnabled,
 
+
             onAddSafeZone =
                 guardianViewModel::
                 addSafeZone,
+
+
+            /*
+             * 알림 설정
+             */
 
             onNotificationSettingsChange =
                 guardianViewModel::
@@ -229,22 +450,26 @@ fun GuardianApp() {
 
 
             /*
-             * -------------------------------------------------
              * 워치 페어링
-             * -------------------------------------------------
              */
 
             pairingState =
                 pairingState,
 
+
             onPairingCodeSubmit =
                 guardianViewModel::
                 redeemPairingCode,
+
 
             onResetPairingState =
                 guardianViewModel::
                 resetPairingState,
 
+
+            /*
+             * Padding
+             */
 
             modifier =
                 Modifier.padding(
@@ -253,3 +478,13 @@ fun GuardianApp() {
         )
     }
 }
+
+
+/*
+ * =========================================================
+ * Log TAG
+ * =========================================================
+ */
+
+private const val NAVIGATION_TAG =
+    "GuardianNavigation"

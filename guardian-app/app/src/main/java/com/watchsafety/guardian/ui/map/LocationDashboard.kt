@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.watchsafety.guardian.data.MockGuardianRepository
 import com.watchsafety.guardian.domain.model.GuardianUser
 import com.watchsafety.guardian.domain.model.LocationInfo
+import com.watchsafety.guardian.domain.model.ReturnHomeStatus
 import com.watchsafety.guardian.domain.model.SafetyState
 import com.watchsafety.guardian.domain.model.WatchStatus
 import com.watchsafety.guardian.ui.components.GuardianTopBar
@@ -49,13 +50,19 @@ fun CurrentLocationScreen(
     watchStatus: WatchStatus,
     location: LocationInfo,
     returnHomeRequested: Boolean,
+    returnHomeStatus: ReturnHomeStatus,
     isRefreshing: Boolean,
     onReturnHomeClick: () -> Unit,
     onRefreshClick: () -> Unit,
     onBack: () -> Unit,
 ) {
     Scaffold(
-        topBar = { GuardianTopBar(title = "현재 위치", onBack = onBack) },
+        topBar = {
+            GuardianTopBar(
+                title = "현재 위치",
+                onBack = onBack,
+            )
+        },
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -66,11 +73,13 @@ fun CurrentLocationScreen(
                 modifier = Modifier.fillMaxSize(),
                 userLabel = "${user.name} 님",
             )
+
             LocationBottomSheet(
                 user = user,
                 watchStatus = watchStatus,
                 location = location,
                 returnHomeRequested = returnHomeRequested,
+                returnHomeStatus = returnHomeStatus,
                 isRefreshing = isRefreshing,
                 onReturnHomeClick = onReturnHomeClick,
                 onRefreshClick = onRefreshClick,
@@ -86,11 +95,54 @@ private fun LocationBottomSheet(
     watchStatus: WatchStatus,
     location: LocationInfo,
     returnHomeRequested: Boolean,
+    returnHomeStatus: ReturnHomeStatus,
     isRefreshing: Boolean,
     onReturnHomeClick: () -> Unit,
     onRefreshClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val statusText =
+        when (returnHomeStatus) {
+            ReturnHomeStatus.NONE -> null
+            ReturnHomeStatus.REQUESTED -> "워치의 응답을 기다리고 있어요"
+            ReturnHomeStatus.ACCEPTED -> "귀가 요청을 수락했어요"
+            ReturnHomeStatus.NAVIGATING -> "집으로 이동 중이에요"
+            ReturnHomeStatus.ARRIVED -> "집에 도착했어요"
+            ReturnHomeStatus.COMPLETED -> "안전하게 귀가했어요"
+            ReturnHomeStatus.CANCELLED -> "나중에 귀가하기로 했어요"
+        }
+
+    val statusColor =
+        when (returnHomeStatus) {
+            ReturnHomeStatus.ARRIVED,
+            ReturnHomeStatus.COMPLETED -> SafeGreen
+
+            ReturnHomeStatus.CANCELLED,
+            ReturnHomeStatus.NONE ->
+                MaterialTheme.colorScheme.onSurfaceVariant
+
+            else -> TrustBlue
+        }
+
+    val isReturnHomeActive =
+        returnHomeStatus.isActive ||
+                (
+                        returnHomeStatus == ReturnHomeStatus.NONE &&
+                                returnHomeRequested
+                        )
+
+    val buttonText =
+        when (returnHomeStatus) {
+            ReturnHomeStatus.REQUESTED -> "응답 대기 중"
+            ReturnHomeStatus.ACCEPTED -> "귀가 준비 중"
+            ReturnHomeStatus.NAVIGATING,
+            ReturnHomeStatus.ARRIVED -> "귀가 중"
+
+            ReturnHomeStatus.NONE,
+            ReturnHomeStatus.COMPLETED,
+            ReturnHomeStatus.CANCELLED -> "집으로 귀가 요청"
+        }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -110,16 +162,26 @@ private fun LocationBottomSheet(
                     text = "${user.name} 님의 현재 위치",
                     style = MaterialTheme.typography.titleLarge,
                 )
+
                 StatusBadge(
-                    state = if (location.isInsideSafeZone) SafetyState.SAFE else SafetyState.WARNING,
+                    state =
+                        if (location.isInsideSafeZone) {
+                            SafetyState.SAFE
+                        } else {
+                            SafetyState.WARNING
+                        },
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Icon(
                     imageVector = Icons.Rounded.LocationOn,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
                 Text(
                     text = location.address,
                     modifier = Modifier.padding(start = 6.dp),
@@ -127,10 +189,14 @@ private fun LocationBottomSheet(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(16.dp),
+                    )
                     .padding(vertical = 12.dp),
             ) {
                 LocationStat(
@@ -138,45 +204,88 @@ private fun LocationBottomSheet(
                     value = location.lastUpdatedLabel,
                     modifier = Modifier.weight(1f),
                 )
+
                 LocationStat(
                     label = "배터리",
                     value = "${watchStatus.batteryPercent}%",
                     modifier = Modifier.weight(1f),
                 )
+
                 LocationStat(
                     label = "안전구역",
-                    value = if (location.isInsideSafeZone) "안 · ${location.safeZoneName}" else "구역 밖",
-                    valueColor = if (location.isInsideSafeZone) SafeGreen else MaterialTheme.colorScheme.error,
+                    value =
+                        if (location.isInsideSafeZone) {
+                            "안 · ${location.safeZoneName}"
+                        } else {
+                            "구역 밖"
+                        },
+                    valueColor =
+                        if (location.isInsideSafeZone) {
+                            SafeGreen
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
                     modifier = Modifier.weight(1f),
                 )
             }
+
+            if (statusText != null) {
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = statusColor,
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Button(
                     onClick = onReturnHomeClick,
+                    enabled = !isReturnHomeActive,
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (returnHomeRequested) SafeGreen else TrustBlue,
-                    ),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                if (isReturnHomeActive) {
+                                    SafeGreen
+                                } else {
+                                    TrustBlue
+                                },
+                        ),
                     shape = RoundedCornerShape(14.dp),
                 ) {
-                    Icon(imageVector = Icons.Rounded.Home, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.Home,
+                        contentDescription = null,
+                    )
+
                     Text(
-                        text = if (returnHomeRequested) "귀가 요청 전송됨" else "집으로 귀가 요청",
+                        text = buttonText,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
+
                 OutlinedButton(
                     onClick = onRefreshClick,
                     enabled = !isRefreshing,
                     border = BorderStroke(1.dp, DividerColor),
                     shape = RoundedCornerShape(14.dp),
                 ) {
-                    Icon(imageVector = Icons.Rounded.Refresh, contentDescription = "갱신")
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "갱신",
+                    )
+
                     Text(
-                        text = if (isRefreshing) "갱신 중" else "갱신",
+                        text =
+                            if (isRefreshing) {
+                                "갱신 중"
+                            } else {
+                                "갱신"
+                            },
                         modifier = Modifier.padding(start = 4.dp),
                     )
                 }
@@ -201,6 +310,7 @@ private fun LocationStat(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelMedium,
         )
+
         Text(
             text = value,
             color = valueColor,
@@ -210,16 +320,25 @@ private fun LocationStat(
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Preview(
+    showBackground = true,
+    widthDp = 390,
+    heightDp = 844,
+)
 @Composable
 private fun CurrentLocationPreview() {
-    val preview = MockGuardianRepository().snapshot.value
+    val preview =
+        MockGuardianRepository()
+            .snapshot
+            .value
+
     WatchSafetyTheme {
         CurrentLocationScreen(
             user = preview.user,
             watchStatus = preview.watchStatus,
             location = preview.location,
             returnHomeRequested = preview.returnHomeRequested,
+            returnHomeStatus = preview.returnHomeStatus,
             isRefreshing = false,
             onReturnHomeClick = {},
             onRefreshClick = {},

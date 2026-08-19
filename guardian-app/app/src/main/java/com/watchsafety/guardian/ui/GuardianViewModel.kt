@@ -3,41 +3,77 @@ package com.watchsafety.guardian.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+
 import com.watchsafety.guardian.data.GuardianRepository
 import com.watchsafety.guardian.data.GuardianRepositoryProvider
+
 import com.watchsafety.guardian.domain.model.GuardianSnapshot
 import com.watchsafety.guardian.domain.model.NotificationSettings
+
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+
 import kotlinx.coroutines.launch
 
 
+/*
+ * =========================================================
+ * 메인 UI 상태
+ * =========================================================
+ */
+
 data class GuardianUiState(
-    val snapshot: GuardianSnapshot,
-    val isRefreshing: Boolean = false,
+
+    val snapshot:
+    GuardianSnapshot,
+
+    val isRefreshing:
+    Boolean = false,
 )
 
+
+/*
+ * =========================================================
+ * 페어링 상태
+ * =========================================================
+ */
 
 data class PairingUiState(
 
-    val isLoading: Boolean =
-        false,
+    val isLoading:
+    Boolean = false,
 
-    val isSuccess: Boolean =
-        false,
+    val isSuccess:
+    Boolean = false,
 
-    val errorMessage: String? =
-        null,
+    val errorMessage:
+    String? = null,
 )
 
 
-class GuardianViewModel(
-    private val repository: GuardianRepository,
-) : ViewModel() {
+/*
+ * =========================================================
+ * GuardianViewModel
+ * =========================================================
+ */
 
+class GuardianViewModel(
+
+    private val repository:
+    GuardianRepository,
+
+    ) : ViewModel() {
+
+
+    /*
+     * =====================================================
+     * 새로고침
+     * =====================================================
+     */
 
     private val isRefreshing =
         MutableStateFlow(
@@ -46,9 +82,9 @@ class GuardianViewModel(
 
 
     /*
-     * -----------------------------------------------------
-     * 워치 페어링 상태
-     * -----------------------------------------------------
+     * =====================================================
+     * 페어링
+     * =====================================================
      */
 
     private val _pairingUiState =
@@ -56,13 +92,39 @@ class GuardianViewModel(
             PairingUiState()
         )
 
+
     val pairingUiState:
             StateFlow<PairingUiState> =
         _pairingUiState
 
 
+    /*
+     * =====================================================
+     * 새 SOS
+     * =====================================================
+     *
+     * 이전처럼 ViewModel에서 Snapshot을 비교하지 않는다.
+     *
+     * SupabaseGuardianRepository에서
+     * 실제 새로운 SOS를 감지한 순간
+     * 이벤트가 전달된다.
+     */
+
+    val newSosEvent:
+            Flow<Unit> =
+        repository
+            .newSosEvent
+
+
+    /*
+     * =====================================================
+     * 메인 상태
+     * =====================================================
+     */
+
     val uiState:
             StateFlow<GuardianUiState> =
+
         combine(
 
             repository.snapshot,
@@ -71,9 +133,14 @@ class GuardianViewModel(
 
             ) { snapshot, refreshing ->
 
+
             GuardianUiState(
-                snapshot = snapshot,
-                isRefreshing = refreshing,
+
+                snapshot =
+                    snapshot,
+
+                isRefreshing =
+                    refreshing,
             )
 
         }.stateIn(
@@ -89,6 +156,7 @@ class GuardianViewModel(
 
             initialValue =
                 GuardianUiState(
+
                     repository
                         .snapshot
                         .value
@@ -96,12 +164,19 @@ class GuardianViewModel(
         )
 
 
+    /*
+     * =====================================================
+     * 상태 새로고침
+     * =====================================================
+     */
+
     fun refreshStatus() {
 
         viewModelScope.launch {
 
             isRefreshing.value =
                 true
+
 
             try {
 
@@ -120,6 +195,12 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * 귀가 요청
+     * =====================================================
+     */
+
     fun sendReturnHomeRequest() {
 
         launchRepositoryAction {
@@ -130,10 +211,21 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * 안전구역 ON/OFF
+     * =====================================================
+     */
+
     fun setSafeZoneEnabled(
-        zoneId: String,
-        enabled: Boolean,
-    ) {
+
+        zoneId:
+        String,
+
+        enabled:
+        Boolean,
+
+        ) {
 
         launchRepositoryAction {
 
@@ -146,10 +238,21 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * 안전구역 추가
+     * =====================================================
+     */
+
     fun addSafeZone(
-        name: String,
-        radiusMeters: Int,
-    ) {
+
+        name:
+        String,
+
+        radiusMeters:
+        Int,
+
+        ) {
 
         launchRepositoryAction {
 
@@ -162,8 +265,15 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * 알림 설정
+     * =====================================================
+     */
+
     fun updateNotificationSettings(
-        settings: NotificationSettings,
+        settings:
+        NotificationSettings,
     ) {
 
         launchRepositoryAction {
@@ -178,28 +288,30 @@ class GuardianViewModel(
 
     /*
      * =====================================================
-     * 워치 6자리 코드 연결
+     * 워치 연결
      * =====================================================
      */
 
     fun redeemPairingCode(
-        code: String,
+        code:
+        String,
     ) {
 
-        /*
-         * 연속 클릭 방지
-         */
+
         if (
             _pairingUiState
                 .value
                 .isLoading
         ) {
+
             return
         }
 
 
         val normalizedCode =
+
             code.filter {
+
                 it.isDigit()
             }
 
@@ -209,10 +321,13 @@ class GuardianViewModel(
         ) {
 
             _pairingUiState.value =
+
                 PairingUiState(
+
                     errorMessage =
                         "6자리 연결 코드를 입력해주세요."
                 )
+
 
             return
         }
@@ -220,11 +335,11 @@ class GuardianViewModel(
 
         viewModelScope.launch {
 
-            /*
-             * 로딩 시작
-             */
+
             _pairingUiState.value =
+
                 PairingUiState(
+
                     isLoading =
                         true
                 )
@@ -237,50 +352,63 @@ class GuardianViewModel(
                         normalizedCode
                     )
 
+
             }.onSuccess {
 
+
                 _pairingUiState.value =
+
                     PairingUiState(
+
                         isSuccess =
                             true
                     )
 
+
             }.onFailure { error ->
 
-                /*
-                 * DB에서는
-                 * 잘못된 코드 / 만료 코드도
-                 * 예외로 반환됨.
-                 */
+
                 val message =
+
                     when {
+
 
                         error.message
                             ?.contains(
                                 "expired",
-                                ignoreCase = true
-                            ) == true ->
+                                ignoreCase =
+                                    true
+                            ) == true -> {
+
 
                             "코드가 만료되었거나 올바르지 않습니다."
+                        }
 
 
                         error.message
                             ?.contains(
                                 "already paired",
-                                ignoreCase = true
-                            ) == true ->
+                                ignoreCase =
+                                    true
+                            ) == true -> {
+
 
                             "이미 다른 보호자와 연결된 워치입니다."
+                        }
 
 
-                        else ->
+                        else -> {
+
 
                             "워치 연결에 실패했습니다.\n코드를 다시 확인해주세요."
+                        }
                     }
 
 
                 _pairingUiState.value =
+
                     PairingUiState(
+
                         errorMessage =
                             message
                     )
@@ -290,9 +418,11 @@ class GuardianViewModel(
 
 
     /*
-     * 연결 화면을 다시 열 때
-     * 이전 성공/오류 상태 제거
+     * =====================================================
+     * 페어링 상태 초기화
+     * =====================================================
      */
+
     fun resetPairingState() {
 
         _pairingUiState.value =
@@ -300,8 +430,15 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * Repository 공통 실행
+     * =====================================================
+     */
+
     private fun launchRepositoryAction(
-        action: suspend () -> Unit,
+        action:
+        suspend () -> Unit,
     ) {
 
         viewModelScope.launch {
@@ -314,6 +451,12 @@ class GuardianViewModel(
     }
 
 
+    /*
+     * =====================================================
+     * Factory
+     * =====================================================
+     */
+
     companion object {
 
         fun factory():
@@ -322,25 +465,34 @@ class GuardianViewModel(
             object :
                 ViewModelProvider.Factory {
 
+
                 @Suppress(
                     "UNCHECKED_CAST"
                 )
+
                 override fun <T : ViewModel>
                         create(
-                    modelClass: Class<T>,
+                    modelClass:
+                    Class<T>,
                 ): T {
 
+
                     require(
+
                         modelClass
                             .isAssignableFrom(
+
                                 GuardianViewModel::
                                 class.java
                             )
                     )
 
+
                     return GuardianViewModel(
+
                         GuardianRepositoryProvider
                             .create()
+
                     ) as T
                 }
             }

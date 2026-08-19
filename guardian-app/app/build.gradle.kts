@@ -1,10 +1,11 @@
 import java.util.Properties
 
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-}
+        plugins {
+            id("com.android.application")
+            id("org.jetbrains.kotlin.plugin.compose")
+            id("org.jetbrains.kotlin.plugin.serialization")
+            id("com.google.gms.google-services")
+        }
 
 val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
@@ -86,7 +87,13 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:realtime-kt")
     implementation("io.ktor:ktor-client-okhttp:3.5.1")
+    implementation(
+        platform("com.google.firebase:firebase-bom:34.17.0")
+    )
 
+    implementation(
+        "com.google.firebase:firebase-messaging"
+    )
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

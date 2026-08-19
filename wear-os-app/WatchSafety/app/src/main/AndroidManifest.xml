@@ -1,23 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- 인터넷 -->
-    <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- 기존 기능 -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- =====================================================
+         기본
+         ===================================================== -->
 
-    <!-- Galaxy Watch 4 심박수 -->
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission
+        android:name="android.permission.INTERNET" />
 
-    <!-- GPS -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.WAKE_LOCK" />
 
-    <uses-feature android:name="android.hardware.type.watch" />
+    <uses-permission
+        android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+
+    <!-- =====================================================
+         센서 / Health Services
+         ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.BODY_SENSORS" />
+
+    <uses-permission
+        android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+
+    <!-- =====================================================
+         GPS
+         ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+
+    <!-- =====================================================
+         알림 / 진동 / 긴급 화면
+         ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.VIBRATE" />
+
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-permission
+        android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+
+    <!-- =====================================================
+         Foreground Service
+         ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+
+    <!-- =====================================================
+         Wear OS
+         ===================================================== -->
+
+    <uses-feature
+        android:name="android.hardware.type.watch"
+        android:required="true" />
+
+
+    <!-- =====================================================
+         Health Services 패키지 조회
+         ===================================================== -->
 
     <queries>
 
@@ -26,31 +90,27 @@
 
     </queries>
 
-    <!-- 심박수 및 건강 데이터 측정 권한 -->
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
-    <!-- GPS 위치 권한 -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- =====================================================
+         Application
+         ===================================================== -->
 
-    <!-- 위급 상황 알림을 위한 진동, 화면 깨우기, 알림 권한 -->
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Health Services 백그라운드 실행을 위한 포그라운드 서비스 권한 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <application
 
         android:allowBackup="true"
+
         android:icon="@mipmap/ic_launcher"
+
         android:label="@string/app_name"
+
         android:supportsRtl="true"
+
         android:theme="@android:style/Theme.DeviceDefault">
+
+
+        <!-- =================================================
+             Wear OS
+             ================================================= -->
 
         <uses-library
             android:name="com.google.android.wearable"
@@ -60,15 +120,26 @@
             android:name="wear-sdk"
             android:required="false" />
 
+
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
 
+
+        <!-- =================================================
+             MainActivity
+             ================================================= -->
+
         <activity
+
             android:name=".ui.MainActivity"
+
             android:exported="true"
+
             android:taskAffinity=""
+
             android:theme="@style/MainActivityTheme.Starting">
+
 
             <intent-filter>
 
@@ -81,16 +152,70 @@
             </intent-filter>
 
         </activity>
-        <receiver android:name=".ui.MedicationReceiver" android:exported="false" />
+
+
+        <!-- =================================================
+             복약 알림 Receiver
+             ================================================= -->
+
+        <receiver
+
+            android:name=".ui.MedicationReceiver"
+
+            android:exported="false" />
+
+
+        <!-- =================================================
+             Health Services
+             ================================================= -->
+
         <service
+
             android:name=".safety.PassiveHealthEventService"
+
             android:exported="true"
-            android:permission="com.google.android.wearable.healthservices.permission.PASSIVE_DATA_BINDING" />
+
+            android:permission=
+                "com.google.android.wearable.healthservices.permission.PASSIVE_DATA_BINDING" />
+
+
+        <!-- =================================================
+             기존 안전 Foreground Service
+             ================================================= -->
+
         <service
+
             android:name=".safety.DemoSafetyService"
+
             android:exported="false"
+
             android:foregroundServiceType="health|location" />
 
+
+        <!-- =================================================
+             Firebase Cloud Messaging
+
+             보호자 → 워치 귀가 요청
+             백그라운드 Push 수신
+             ================================================= -->
+
+        <service
+
+            android:name=".notification.WatchFirebaseMessagingService"
+
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.firebase.MESSAGING_EVENT" />
+
+            </intent-filter>
+
+        </service>
+
+
     </application>
+
 
 </manifest>

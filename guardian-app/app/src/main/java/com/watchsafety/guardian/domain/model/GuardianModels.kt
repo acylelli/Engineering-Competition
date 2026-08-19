@@ -88,6 +88,36 @@ data class NotificationSettings(
     val batteryLowAlert: Boolean,
 )
 
+enum class ReturnHomeStatus {
+    NONE,
+    REQUESTED,
+    ACCEPTED,
+    NAVIGATING,
+    ARRIVED,
+    COMPLETED,
+    CANCELLED;
+
+    val isActive: Boolean
+        get() =
+            this == REQUESTED ||
+                    this == ACCEPTED ||
+                    this == NAVIGATING ||
+                    this == ARRIVED
+
+    companion object {
+        fun fromDb(status: String?): ReturnHomeStatus =
+            when (status) {
+                "REQUESTED" -> REQUESTED
+                "ACCEPTED" -> ACCEPTED
+                "NAVIGATING" -> NAVIGATING
+                "ARRIVED" -> ARRIVED
+                "COMPLETED" -> COMPLETED
+                "CANCELLED" -> CANCELLED
+                else -> NONE
+            }
+    }
+}
+
 data class GuardianSnapshot(
     val user: GuardianUser,
     val watchStatus: WatchStatus,
@@ -97,4 +127,5 @@ data class GuardianSnapshot(
     val emergency: EmergencyDetail,
     val notificationSettings: NotificationSettings,
     val returnHomeRequested: Boolean,
+    val returnHomeStatus: ReturnHomeStatus,
 )
