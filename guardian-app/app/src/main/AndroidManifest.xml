@@ -2,11 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Android 13 이상 알림 권한 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".GuardianApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -24,7 +23,6 @@
 
         </activity>
 
-        <!-- FCM 메시지 수신 -->
         <service
             android:name=".push.GuardianFirebaseMessagingService"
             android:exported="false">
@@ -34,6 +32,25 @@
             </intent-filter>
 
         </service>
+
+        <activity
+            android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="kakao6fd2e14f3ce74362f3c78cbe23915052"
+                    android:host="oauth" />
+
+            </intent-filter>
+
+        </activity>
 
     </application>
 

@@ -442,59 +442,54 @@ class SupabaseGuardianRepository(
             .auth
             .awaitInitialization()
 
-        val existingSession =
-            supabase
-                .auth
-                .currentSessionOrNull()
 
-        if (
-            existingSession != null
-        ) {
-
-            val existingUserId =
-                requireNotNull(
-                    existingSession.user?.id
-                ) {
-
-                    "Existing Supabase session has no user id."
-                }
-
-            Log.d(
-                TAG,
-                "기존 Guardian Auth 세션 사용: $existingUserId"
-            )
-
-            return existingUserId
-        }
-
-        supabase
-            .auth
-            .signInAnonymously()
-
-        val newSession =
+        val session =
             requireNotNull(
                 supabase
                     .auth
                     .currentSessionOrNull()
             ) {
 
-                "Supabase authentication session was not created."
+                "보호자 로그인이 필요합니다."
             }
 
-        val newUserId =
+
+        val kakaoIdentityExists =
+            supabase
+                .auth
+                .currentIdentitiesOrNull()
+                .orEmpty()
+                .any { identity ->
+
+                    identity.provider ==
+                            "kakao"
+                }
+
+
+        require(
+            kakaoIdentityExists
+        ) {
+
+            "카카오 보호자 로그인이 필요합니다."
+        }
+
+
+        val userId =
             requireNotNull(
-                newSession.user?.id
+                session.user?.id
             ) {
 
-                "New Supabase session has no user id."
+                "Supabase 사용자 ID가 없습니다."
             }
+
 
         Log.d(
             TAG,
-            "새 Guardian Auth 생성: $newUserId"
+            "Kakao Guardian Auth 완료: $userId"
         )
 
-        return newUserId
+
+        return userId
     }
 
     /*

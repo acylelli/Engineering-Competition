@@ -11,9 +11,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+
+import androidx.compose.material3.CircularProgressIndicator
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 
 import androidx.core.content.ContextCompat
 
@@ -21,10 +30,12 @@ import androidx.lifecycle.lifecycleScope
 
 import com.google.firebase.messaging.FirebaseMessaging
 
+import com.watchsafety.guardian.auth.KakaoAuthManager
 import com.watchsafety.guardian.data.GuardianPushTokenManager
 import com.watchsafety.guardian.data.SupabaseClientProvider
 
 import com.watchsafety.guardian.ui.GuardianApp
+import com.watchsafety.guardian.ui.login.LoginScreen
 import com.watchsafety.guardian.ui.theme.WatchSafetyTheme
 
 import kotlinx.coroutines.launch
@@ -36,17 +47,32 @@ class MainActivity :
 
     /*
      * =====================================================
-     * 긴급화면 이동 요청
+     * 로그인 화면 상태
      * =====================================================
-     *
-     * 0 = 일반 앱 실행
-     *
-     * 1 이상 =
-     * FCM 알림을 눌러서 앱이 열림
-     *
-     * 새로운 SOS 알림을 누를 때마다 +1
-     * Compose가 변경을 감지해서
-     * EMERGENCY 화면으로 이동한다.
+     */
+
+    private var authUiState by
+    mutableStateOf(
+        AuthUiState.CHECKING
+    )
+
+
+    private var loginLoading by
+    mutableStateOf(
+        false
+    )
+
+
+    private var loginErrorMessage by
+    mutableStateOf<String?>(
+        null
+    )
+
+
+    /*
+     * =====================================================
+     * 긴급 화면 이동 요청
+     * =====================================================
      */
 
     private var emergencyRequestVersion by
@@ -57,7 +83,22 @@ class MainActivity :
 
     /*
      * =====================================================
-     * 알림 권한 요청
+     * Supabase / Kakao Auth
+     * =====================================================
+     */
+
+    private val kakaoAuthManager by lazy {
+
+        KakaoAuthManager(
+            supabase =
+                SupabaseClientProvider.client
+        )
+    }
+
+
+    /*
+     * =====================================================
+     * 알림 권한
      * =====================================================
      */
 
@@ -91,7 +132,7 @@ class MainActivity :
 
         /*
          * -------------------------------------------------
-         * FCM 알림 클릭으로 앱이 실행된 경우
+         * FCM 알림으로 앱 실행
          * -------------------------------------------------
          */
 
@@ -102,20 +143,11 @@ class MainActivity :
 
         /*
          * -------------------------------------------------
-         * Android 13 이상 알림 권한
+         * 알림 권한
          * -------------------------------------------------
          */
 
         requestNotificationPermission()
-
-
-        /*
-         * -------------------------------------------------
-         * FCM Token
-         * -------------------------------------------------
-         */
-
-        fetchAndSyncFcmToken()
 
 
         /*
@@ -128,10 +160,237 @@ class MainActivity :
 
             WatchSafetyTheme {
 
-                GuardianApp(
+                when (
+                    authUiState
+                ) {
 
-                    emergencyRequestVersion =
-                        emergencyRequestVersion
+
+                    /*
+                     * =========================================
+                     * 저장된 로그인 세션 확인 중
+                     * =========================================
+                     */
+
+                    AuthUiState.CHECKING -> {
+
+                        Box(
+                            modifier =
+                                Modifier.fillMaxSize(),
+                            contentAlignment =
+                                Alignment.Center,
+                        ) {
+
+                            CircularProgressIndicator()
+                        }
+                    }
+
+
+                    /*
+                     * =========================================
+                     * 로그인 필요
+                     * =========================================
+                     */
+
+                    AuthUiState.SIGNED_OUT -> {
+
+                        LoginScreen(
+                            isLoading =
+                                loginLoading,
+                            errorMessage =
+                                loginErrorMessage,
+                            onKakaoLogin = {
+                                startKakaoLogin()
+                            },
+                        )
+                    }
+
+
+                    /*
+                     * =========================================
+                     * 로그인 완료
+                     * =========================================
+                     */
+
+                    AuthUiState.SIGNED_IN -> {
+
+                        GuardianApp(
+                            emergencyRequestVersion =
+                                emergencyRequestVersion
+                        )
+                    }
+                }
+            }
+        }
+
+
+        /*
+         * -------------------------------------------------
+         * 저장된 Supabase 로그인 확인
+         * -------------------------------------------------
+         */
+
+        checkSavedLoginSession()
+    }
+
+
+    /*
+     * =====================================================
+     * 저장된 로그인 세션 확인
+     * =====================================================
+     */
+
+    private fun checkSavedLoginSession() {
+
+        lifecycleScope.launch {
+
+            runCatching {
+
+                kakaoAuthManager
+                    .hasKakaoSession()
+
+            }.onSuccess { hasSession ->
+
+
+                if (
+                    hasSession
+                ) {
+
+                    Log.d(
+                        AUTH_TAG,
+                        "저장된 Kakao/Supabase 세션 확인 완료"
+                    )
+
+
+                    /*
+                     * 메인 화면
+                     */
+                    authUiState =
+                        AuthUiState.SIGNED_IN
+
+
+                    /*
+                     * 로그인된 guardian_id로
+                     * FCM Token 저장
+                     */
+                    fetchAndSyncFcmToken()
+
+
+                } else {
+
+                    Log.d(
+                        AUTH_TAG,
+                        "저장된 Kakao 세션 없음"
+                    )
+
+
+                    authUiState =
+                        AuthUiState.SIGNED_OUT
+                }
+
+
+            }.onFailure { error ->
+
+
+                Log.e(
+                    AUTH_TAG,
+                    "로그인 상태 확인 실패",
+                    error
+                )
+
+
+                loginErrorMessage =
+                    "로그인 상태를 확인하지 못했습니다."
+
+
+                authUiState =
+                    AuthUiState.SIGNED_OUT
+            }
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 카카오 로그인 시작
+     * =====================================================
+     */
+
+    private fun startKakaoLogin() {
+
+
+        if (
+            loginLoading
+        ) {
+
+            return
+        }
+
+
+        loginLoading =
+            true
+
+
+        loginErrorMessage =
+            null
+
+
+        lifecycleScope.launch {
+
+
+            runCatching {
+
+                kakaoAuthManager
+                    .login(
+                        context =
+                            this@MainActivity
+                    )
+
+            }.onSuccess { guardianId ->
+
+
+                Log.d(
+                    AUTH_TAG,
+                    "Kakao → Supabase 로그인 완료"
+                )
+
+
+                Log.d(
+                    AUTH_TAG,
+                    "guardianId=$guardianId"
+                )
+
+
+                loginLoading =
+                    false
+
+
+                authUiState =
+                    AuthUiState.SIGNED_IN
+
+
+                /*
+                 * 로그인 성공한 사용자에게
+                 * FCM Token 연결
+                 */
+                fetchAndSyncFcmToken()
+
+
+            }.onFailure { error ->
+
+
+                loginLoading =
+                    false
+
+
+                loginErrorMessage =
+                    error.message
+                        ?: "카카오 로그인에 실패했습니다."
+
+
+                Log.e(
+                    AUTH_TAG,
+                    "Kakao/Supabase 로그인 실패",
+                    error
                 )
             }
         }
@@ -140,16 +399,8 @@ class MainActivity :
 
     /*
      * =====================================================
-     * 이미 실행 중인 앱에서
-     * 알림을 눌렀을 때
+     * 이미 실행 중일 때 FCM 알림 클릭
      * =====================================================
-     *
-     * Manifest:
-     *
-     * android:launchMode="singleTop"
-     *
-     * 이기 때문에 기존 MainActivity가
-     * 살아있으면 여기로 새로운 Intent가 온다.
      */
 
     override fun onNewIntent(
@@ -161,10 +412,6 @@ class MainActivity :
         )
 
 
-        /*
-         * Activity의 현재 Intent도
-         * 새로운 Intent로 갱신
-         */
         setIntent(
             intent
         )
@@ -195,13 +442,6 @@ class MainActivity :
         }
 
 
-        /*
-         * Edge Function에서 FCM data에:
-         *
-         * open_emergency = "true"
-         *
-         * 로 보내고 있다.
-         */
         val openEmergencyString =
 
             intent
@@ -210,10 +450,6 @@ class MainActivity :
                 )
 
 
-        /*
-         * 나중에 직접 Notification을 만들 경우
-         * Boolean extra를 사용하는 경우도 대응
-         */
         val openEmergencyBoolean =
 
             intent
@@ -241,12 +477,6 @@ class MainActivity :
             return
         }
 
-
-        /*
-         * -------------------------------------------------
-         * 추가 FCM 정보
-         * -------------------------------------------------
-         */
 
         val eventId =
 
@@ -283,9 +513,11 @@ class MainActivity :
 
 
         /*
-         * -------------------------------------------------
-         * Compose에 긴급화면 이동 요청
-         * -------------------------------------------------
+         * GuardianApp이 아직 안 떠 있어도
+         * version 값은 유지된다.
+         *
+         * 로그인 완료 후 GuardianApp이 생성되면
+         * 긴급 화면으로 이동 가능하다.
          */
 
         emergencyRequestVersion++
@@ -313,10 +545,6 @@ class MainActivity :
             .addOnCompleteListener { task ->
 
 
-                /*
-                 * Token 실패
-                 */
-
                 if (
                     !task.isSuccessful
                 ) {
@@ -332,38 +560,20 @@ class MainActivity :
                 }
 
 
-                /*
-                 * Token
-                 */
-
                 val token =
                     task.result
 
 
-                Log.d(
-                    FCM_TAG,
-                    "================================"
-                )
-
-                Log.d(
-                    FCM_TAG,
-                    "FCM TOKEN"
-                )
-
-                Log.d(
-                    FCM_TAG,
-                    token
-                )
-
-                Log.d(
-                    FCM_TAG,
-                    "================================"
-                )
-
-
                 /*
-                 * Supabase Client
+                 * FCM Token 전체 문자열은
+                 * Logcat에 출력하지 않는다.
                  */
+
+                Log.d(
+                    FCM_TAG,
+                    "FCM Token 발급 완료"
+                )
+
 
                 val supabase =
 
@@ -384,10 +594,6 @@ class MainActivity :
                     return@addOnCompleteListener
                 }
 
-
-                /*
-                 * Supabase에 Token 저장
-                 */
 
                 lifecycleScope.launch {
 
@@ -437,9 +643,6 @@ class MainActivity :
     private fun requestNotificationPermission() {
 
 
-        /*
-         * Android 13 미만
-         */
         if (
             Build.VERSION.SDK_INT <
             Build.VERSION_CODES.TIRAMISU
@@ -449,9 +652,6 @@ class MainActivity :
         }
 
 
-        /*
-         * 이미 허용
-         */
         if (
 
             ContextCompat
@@ -477,15 +677,27 @@ class MainActivity :
         }
 
 
-        /*
-         * 권한 요청
-         */
         notificationPermissionLauncher
             .launch(
-
                 Manifest.permission
                     .POST_NOTIFICATIONS
             )
+    }
+
+
+    /*
+     * =====================================================
+     * Auth UI State
+     * =====================================================
+     */
+
+    private enum class AuthUiState {
+
+        CHECKING,
+
+        SIGNED_OUT,
+
+        SIGNED_IN,
     }
 
 
@@ -496,6 +708,10 @@ class MainActivity :
      */
 
     private companion object {
+
+
+        const val AUTH_TAG =
+            "GuardianAuth"
 
 
         const val FCM_TAG =
@@ -509,11 +725,6 @@ class MainActivity :
         const val NAVIGATION_TAG =
             "GuardianPushNavigation"
 
-
-        /*
-         * Edge Function에서 보내는 data key와
-         * 정확히 동일해야 한다.
-         */
 
         const val EXTRA_OPEN_EMERGENCY =
             "open_emergency"
