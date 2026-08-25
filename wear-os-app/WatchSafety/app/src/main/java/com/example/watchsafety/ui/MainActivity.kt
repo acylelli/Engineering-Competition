@@ -2,8 +2,10 @@ package com.example.watchsafety.ui
 
 import android.Manifest
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
@@ -55,6 +57,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.core.content.ContextCompat
+
 import androidx.lifecycle.lifecycleScope
 
 import androidx.wear.compose.material.Button
@@ -73,10 +77,11 @@ import com.example.watchsafety.data.WatchStatusManager
 import com.example.watchsafety.health.HeartRateManager
 import com.example.watchsafety.location.WatchLocation
 import com.example.watchsafety.location.WatchLocationManager
+import com.example.watchsafety.location.WatchTrackingService
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
-import com.example.watchsafety.pairing.PairingManager
 import com.example.watchsafety.notification.WatchFirebaseMessagingService
+import com.example.watchsafety.pairing.PairingManager
 import com.example.watchsafety.safety.DemoSafetyService
 import com.example.watchsafety.safety.FallEventState
 import com.example.watchsafety.safety.FallHealthServiceManager
@@ -123,7 +128,32 @@ enum class AppScreen {
  * =========================================================
  */
 
-class MainActivity : ComponentActivity() {
+class MainActivity :
+    ComponentActivity() {
+
+
+    companion object {
+
+        /*
+         * =================================================
+         * 현재 MainActivity가 사용자에게 보이는 상태인지 확인
+         * =================================================
+         *
+         * WatchFirebaseMessagingService에서
+         * 귀가 요청 FCM을 받았을 때
+         *
+         * true
+         * → 알림 대신 앱 내부 귀가 요청 화면 즉시 표시
+         *
+         * false
+         * → Notification 표시
+         */
+        @Volatile
+        var isInForeground:
+                Boolean = false
+
+            private set
+    }
 
 
     private lateinit var heartRateManager:
@@ -195,10 +225,94 @@ class MainActivity : ComponentActivity() {
 
 
     /*
-     * Realtime 수신 시 현재 Activity가 실제 화면에 보이는지 확인
+     * Realtime 수신 시
+     * 현재 Activity가 실제 화면에 보이는지 확인
      */
     private var isActivityResumed:
             Boolean = false
+
+
+    /*
+     * Foreground FCM BroadcastReceiver 등록 여부
+     */
+    private var returnHomePushReceiverRegistered:
+            Boolean = false
+
+
+    /*
+     * =====================================================
+     * Foreground 귀가 요청 FCM Receiver
+     * =====================================================
+     *
+     * WatchFirebaseMessagingService가
+     * 앱이 현재 화면에 떠 있다고 판단하면
+     * Notification 대신 Broadcast를 보낸다.
+     *
+     * 여기서 즉시 RETURN_HOME_REQUEST 화면으로 전환.
+     */
+    private val returnHomePushReceiver =
+
+        object :
+            BroadcastReceiver() {
+
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?,
+            ) {
+
+                if (
+                    intent?.action !=
+                    WatchFirebaseMessagingService
+                        .ACTION_RETURN_HOME_REQUEST_RECEIVED
+                ) {
+
+                    return
+                }
+
+
+                val requestId =
+                    intent.getStringExtra(
+                        WatchFirebaseMessagingService
+                            .EXTRA_REQUEST_ID
+                    )
+
+
+                val pushGuardianId =
+                    intent.getStringExtra(
+                        WatchFirebaseMessagingService
+                            .EXTRA_GUARDIAN_ID
+                    )
+
+
+                val pushWearerId =
+                    intent.getStringExtra(
+                        WatchFirebaseMessagingService
+                            .EXTRA_WEARER_ID
+                    )
+
+
+                Log.d(
+                    "ReturnHomeFCM",
+                    "Foreground 귀가 요청 Broadcast 수신 requestId=$requestId"
+                )
+
+
+                showReturnHomeRequest(
+
+                    requestId =
+                        requestId,
+
+                    guardianId =
+                        pushGuardianId,
+
+                    wearerId =
+                        pushWearerId,
+
+                    source =
+                        "FCM_FOREGROUND",
+                )
+            }
+        }
 
 
     private lateinit var fusedLocationClient:
@@ -224,30 +338,45 @@ class MainActivity : ComponentActivity() {
      * 현재 보호자 귀가 요청 ID
      */
     private val currentReturnHomeRequestIdState =
-        mutableStateOf<String?>(null)
+        mutableStateOf<String?>(
+            null
+        )
 
 
     /*
      * 실제 페어링 ID
      */
     private val guardianIdState =
-        mutableStateOf<String?>(null)
+        mutableStateOf<String?>(
+            null
+        )
+
 
     private val wearerIdState =
-        mutableStateOf<String?>(null)
+        mutableStateOf<String?>(
+            null
+        )
 
 
     /*
      * DB의 실제 집 안전구역
      */
     private val homeLatitudeState =
-        mutableStateOf<Double?>(null)
+        mutableStateOf<Double?>(
+            null
+        )
+
 
     private val homeLongitudeState =
-        mutableStateOf<Double?>(null)
+        mutableStateOf<Double?>(
+            null
+        )
+
 
     private val homeRadiusMetersState =
-        mutableStateOf<Double?>(null)
+        mutableStateOf<Double?>(
+            null
+        )
 
 
     /*
@@ -266,7 +395,9 @@ class MainActivity : ComponentActivity() {
 
 
         /*
+         * =================================================
          * 잠금 화면에서도 긴급화면 표시
+         * =================================================
          */
 
         if (
@@ -373,8 +504,11 @@ class MainActivity : ComponentActivity() {
 
 
         /*
+         * =================================================
          * 배터리 상태 감시
+         * =================================================
          */
+
         watchStatusManager
             .start(
                 lifecycleScope
@@ -382,15 +516,20 @@ class MainActivity : ComponentActivity() {
 
 
         /*
-         * 실제 페어링 정보 조회 후
-         * 귀가 요청 Realtime 시작
+         * =================================================
+         * 실제 페어링 정보 조회 후 Realtime 시작
+         * =================================================
          */
+
         refreshPairingAndStartRealtime()
 
 
         /*
-         * 알림 Intent 처리
+         * =================================================
+         * Notification 클릭 Intent 처리
+         * =================================================
          */
+
         handleIntent(
             intent
         )
@@ -518,43 +657,152 @@ class MainActivity : ComponentActivity() {
                 ) { permissions ->
 
 
-                    val allGranted =
-                        permissions
-                            .values
-                            .all {
-                                it
-                            }
+                    val fineLocationGranted =
+                        permissions[
+                            Manifest.permission
+                                .ACCESS_FINE_LOCATION
+                        ] == true ||
+                                ContextCompat
+                                    .checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission
+                                            .ACCESS_FINE_LOCATION
+                                    ) ==
+                                android.content.pm.PackageManager
+                                    .PERMISSION_GRANTED
 
 
+                    val bodySensorsGranted =
+                        permissions[
+                            Manifest.permission
+                                .BODY_SENSORS
+                        ] == true ||
+                                ContextCompat
+                                    .checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission
+                                            .BODY_SENSORS
+                                    ) ==
+                                android.content.pm.PackageManager
+                                    .PERMISSION_GRANTED
+
+
+                    val activityRecognitionGranted =
+                        permissions[
+                            Manifest.permission
+                                .ACTIVITY_RECOGNITION
+                        ] == true ||
+                                ContextCompat
+                                    .checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission
+                                            .ACTIVITY_RECOGNITION
+                                    ) ==
+                                android.content.pm.PackageManager
+                                    .PERMISSION_GRANTED
+
+
+                    val notificationGranted =
+                        if (
+                            Build.VERSION.SDK_INT >=
+                            Build.VERSION_CODES.TIRAMISU
+                        ) {
+
+                            permissions[
+                                Manifest.permission
+                                    .POST_NOTIFICATIONS
+                            ] == true ||
+                                    ContextCompat
+                                        .checkSelfPermission(
+                                            this@MainActivity,
+                                            Manifest.permission
+                                                .POST_NOTIFICATIONS
+                                        ) ==
+                                    android.content.pm.PackageManager
+                                        .PERMISSION_GRANTED
+
+                        } else {
+
+                            true
+                        }
+
+
+                    Log.d(
+                        "WatchPermission",
+                        "권한 상태 " +
+                                "location=$fineLocationGranted, " +
+                                "bodySensors=$bodySensorsGranted, " +
+                                "activityRecognition=$activityRecognitionGranted, " +
+                                "notification=$notificationGranted"
+                    )
+
+
+                    /*
+                     * GPS
+                     */
                     if (
-                        allGranted
+                        fineLocationGranted
                     ) {
 
-
-                        /*
-                         * 심박수
-                         */
-                        heartRateManager
-                            .start()
+                        Log.d(
+                            "WatchGPS",
+                            "위치 권한 확인 완료 → GPS 시작"
+                        )
 
 
-                        /*
-                         * GPS
-                         */
                         locationManager
                             .start()
 
 
                         /*
-                         * 안전구역 계산용
-                         * 위치 1회 조회
+                         * 기존 안전구역 계산용 위치 1회 조회
                          */
                         getLocation()
 
 
                         /*
-                         * Health Services 낙상 감지
+                         * 백그라운드 위치 추적
                          */
+                        WatchTrackingService
+                            .start(
+                                this@MainActivity
+                            )
+
+                    } else {
+
+                        Log.w(
+                            "WatchGPS",
+                            "ACCESS_FINE_LOCATION 권한 없음"
+                        )
+                    }
+
+
+                    /*
+                     * 심박수
+                     */
+                    if (
+                        bodySensorsGranted
+                    ) {
+
+                        heartRateManager
+                            .start()
+
+                    } else {
+
+                        Log.w(
+                            "WatchPermission",
+                            "BODY_SENSORS 권한 없음"
+                        )
+                    }
+
+
+                    /*
+                     * Health Services 낙상 감지
+                     */
+                    if (
+                        activityRecognitionGranted
+                    ) {
+
                         lifecycleScope.launch {
 
                             if (
@@ -567,25 +815,38 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-
-                        /*
-                         * 기존 데모 안전 서비스
-                         */
-                        startService(
-
-                            Intent(
-                                this@MainActivity,
-                                DemoSafetyService::class.java
-                            )
-                        )
-
-
                     } else {
+
+                        Log.w(
+                            "WatchPermission",
+                            "ACTIVITY_RECOGNITION 권한 없음"
+                        )
+                    }
+
+
+                    /*
+                     * 기존 데모 안전 서비스
+                     */
+                    startService(
+
+                        Intent(
+                            this@MainActivity,
+                            DemoSafetyService::class.java
+                        )
+                    )
+
+
+                    if (
+                        !fineLocationGranted ||
+                        !bodySensorsGranted ||
+                        !activityRecognitionGranted ||
+                        !notificationGranted
+                    ) {
 
                         Toast
                             .makeText(
                                 this@MainActivity,
-                                "권한이 필요합니다!",
+                                "일부 권한이 허용되지 않았습니다.",
                                 Toast.LENGTH_SHORT
                             )
                             .show()
@@ -679,21 +940,27 @@ class MainActivity : ComponentActivity() {
 
 
                     onPairingCompleted = {
+
                         refreshPairingAndStartRealtime()
                     },
 
 
                     onClearReturnHomeRequest = {
-                        currentReturnHomeRequestIdState.value = null
+
+                        currentReturnHomeRequestIdState.value =
+                            null
                     },
 
 
-                    onReturnHomeRequestAccepted = { requestId ->
+                    onReturnHomeRequestAccepted = {
+                            requestId ->
+
 
                         returnHomeRequestStore
                             .markHandled(
                                 requestId
                             )
+
 
                         cancelReturnHomeNotification(
                             requestId
@@ -705,9 +972,6 @@ class MainActivity : ComponentActivity() {
                         myLocationState.value,
 
 
-                    /*
-                     * 실제 지속 GPS
-                     */
                     watchLocation =
                         location,
 
@@ -726,9 +990,6 @@ class MainActivity : ComponentActivity() {
                         watchLocationSyncManager,
 
 
-                    /*
-                     * 안전 이벤트 Manager
-                     */
                     watchSafetyEventManager =
                         watchSafetyEventManager
                 )
@@ -742,56 +1003,97 @@ class MainActivity : ComponentActivity() {
      * 실제 페어링 정보 조회 + Realtime 시작
      * =====================================================
      */
+
     private fun refreshPairingAndStartRealtime() {
 
         lifecycleScope.launch {
 
             runCatching {
-                pairingManager.getPairingInfo()
+
+                pairingManager
+                    .getPairingInfo()
+
             }.onSuccess { info ->
+
 
                 if (
                     !info.isPaired ||
                     info.guardianId.isNullOrBlank() ||
                     info.wearerId.isNullOrBlank()
                 ) {
-                    guardianIdState.value = null
-                    wearerIdState.value = null
-                    homeLatitudeState.value = null
-                    homeLongitudeState.value = null
-                    homeRadiusMetersState.value = null
-                    returnHomeRealtimeManager.stop()
-                    Log.d("PairingInfo", "현재 페어링 정보 없음")
+
+                    guardianIdState.value =
+                        null
+
+                    wearerIdState.value =
+                        null
+
+                    homeLatitudeState.value =
+                        null
+
+                    homeLongitudeState.value =
+                        null
+
+                    homeRadiusMetersState.value =
+                        null
+
+
+                    returnHomeRealtimeManager
+                        .stop()
+
+
+                    Log.d(
+                        "PairingInfo",
+                        "현재 페어링 정보 없음"
+                    )
+
+
                     return@onSuccess
                 }
+
 
                 val guardianId =
                     info.guardianId
                         ?: return@onSuccess
 
+
                 val wearerId =
                     info.wearerId
                         ?: return@onSuccess
 
-                guardianIdState.value = guardianId
-                wearerIdState.value = wearerId
+
+                guardianIdState.value =
+                    guardianId
+
+
+                wearerIdState.value =
+                    wearerId
+
 
                 Log.d(
                     "PairingInfo",
                     "실제 페어링 정보 조회 성공 guardianId=$guardianId wearerId=$wearerId"
                 )
 
+
                 /*
-                 * 현재 워치 FCM Token → devices.watch_fcm_token 동기화
+                 * 현재 워치 FCM Token
+                 * → devices.watch_fcm_token 동기화
                  */
                 runCatching {
-                    watchFcmTokenManager.syncCurrentToken()
+
+                    watchFcmTokenManager
+                        .syncCurrentToken()
+
                 }.onSuccess {
+
                     Log.d(
                         "WatchFCM",
                         "현재 FCM 토큰 동기화 성공"
                     )
+
                 }.onFailure { error ->
+
                     Log.e(
                         "WatchFCM",
                         "현재 FCM 토큰 동기화 실패",
@@ -799,61 +1101,93 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+
+                /*
+                 * HOME 안전구역 조회
+                 */
                 refreshHomeSafeZone()
 
-                returnHomeRealtimeManager.stop()
-                returnHomeRealtimeManager.start(
-                    guardianId = guardianId,
-                    wearerId = wearerId
-                ) { requestId ->
 
-                    if (
-                        returnHomeRequestStore
-                            .isHandled(
+                /*
+                 * 기존 Realtime 제거 후 다시 시작
+                 */
+                returnHomeRealtimeManager
+                    .stop()
+
+
+                returnHomeRealtimeManager
+                    .start(
+
+                        guardianId =
+                            guardianId,
+
+                        wearerId =
+                            wearerId
+
+                    ) { requestId ->
+
+
+                        if (
+                            returnHomeRequestStore
+                                .isHandled(
+                                    requestId
+                                )
+                        ) {
+
+                            Log.d(
+                                "ReturnHomeRealtime",
+                                "이미 처리한 귀가 요청 무시: $requestId"
+                            )
+
+
+                            return@start
+                        }
+
+
+                        /*
+                         * Realtime에서도 동일한 요청 화면 표시.
+                         *
+                         * FCM이 먼저 와도 괜찮고
+                         * Realtime이 먼저 와도 괜찮다.
+                         */
+                        currentReturnHomeRequestIdState.value =
+                            requestId
+
+
+                        currentScreenState.value =
+                            AppScreen.RETURN_HOME_REQUEST
+
+
+                        if (
+                            isActivityResumed
+                        ) {
+
+                            /*
+                             * 앱 화면이 이미 보이면
+                             * Realtime이 화면을 직접 띄웠기 때문에
+                             * 동일 요청 Notification 제거.
+                             */
+                            returnHomeRequestStore
+                                .markNotified(
+                                    requestId
+                                )
+
+
+                            cancelReturnHomeNotification(
                                 requestId
                             )
-                    ) {
+                        }
+
+
                         Log.d(
                             "ReturnHomeRealtime",
-                            "이미 처리한 귀가 요청 무시: $requestId"
-                        )
-                        return@start
-                    }
-
-                    /*
-                     * Activity가 백그라운드여도 요청 ID는 보관한다.
-                     * 이 경우 FCM 알림은 막지 않는다.
-                     */
-                    currentReturnHomeRequestIdState.value =
-                        requestId
-
-                    currentScreenState.value =
-                        AppScreen.RETURN_HOME_REQUEST
-
-                    if (
-                        isActivityResumed
-                    ) {
-                        /*
-                         * 화면에 앱이 보이는 경우 Realtime이 직접 화면을 표시하므로
-                         * 같은 request_id의 FCM 알림이 중복 표시되지 않게 기록한다.
-                         */
-                        returnHomeRequestStore
-                            .markNotified(
-                                requestId
-                            )
-
-                        cancelReturnHomeNotification(
-                            requestId
+                            "워치 귀가 요청 수신: $requestId"
                         )
                     }
 
-                    Log.d(
-                        "ReturnHomeRealtime",
-                        "워치 귀가 요청 수신: $requestId"
-                    )
-                }
 
             }.onFailure { error ->
+
                 Log.e(
                     "PairingInfo",
                     "페어링 정보 조회 실패",
@@ -863,43 +1197,81 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
     /*
      * =====================================================
      * DB의 실제 집 안전구역 조회
      * =====================================================
      */
+
     private fun refreshHomeSafeZone() {
 
         lifecycleScope.launch {
 
             runCatching {
-                homeSafeZoneManager.getHomeSafeZone()
+
+                homeSafeZoneManager
+                    .getHomeSafeZone()
+
             }.onSuccess { home ->
+
 
                 if (
                     !home.isConfigured ||
                     home.centerLatitude == null ||
                     home.centerLongitude == null
                 ) {
-                    homeLatitudeState.value = null
-                    homeLongitudeState.value = null
-                    homeRadiusMetersState.value = null
-                    Log.d("HomeSafeZone", "등록된 집 안전구역이 없습니다.")
+
+                    homeLatitudeState.value =
+                        null
+
+
+                    homeLongitudeState.value =
+                        null
+
+
+                    homeRadiusMetersState.value =
+                        null
+
+
+                    Log.d(
+                        "HomeSafeZone",
+                        "등록된 집 안전구역이 없습니다."
+                    )
+
+
                     return@onSuccess
                 }
 
-                homeLatitudeState.value = home.centerLatitude
-                homeLongitudeState.value = home.centerLongitude
-                homeRadiusMetersState.value = home.radiusMeters
+
+                homeLatitudeState.value =
+                    home.centerLatitude
+
+
+                homeLongitudeState.value =
+                    home.centerLongitude
+
+
+                homeRadiusMetersState.value =
+                    home.radiusMeters
+
 
                 Log.d(
                     "HomeSafeZone",
-                    "집 안전구역 조회 성공 latitude=${home.centerLatitude} " +
-                            "longitude=${home.centerLongitude} radius=${home.radiusMeters}"
+                    "집 안전구역 조회 성공 " +
+                            "latitude=${home.centerLatitude} " +
+                            "longitude=${home.centerLongitude} " +
+                            "radius=${home.radiusMeters}"
                 )
 
+
             }.onFailure { error ->
-                Log.e("HomeSafeZone", "집 안전구역 조회 실패", error)
+
+                Log.e(
+                    "HomeSafeZone",
+                    "집 안전구역 조회 실패",
+                    error
+                )
             }
         }
     }
@@ -919,9 +1291,11 @@ class MainActivity : ComponentActivity() {
             intent
         )
 
+
         setIntent(
             intent
         )
+
 
         handleIntent(
             intent
@@ -931,7 +1305,7 @@ class MainActivity : ComponentActivity() {
 
     /*
      * =====================================================
-     * Intent 처리
+     * Notification Intent 처리
      * =====================================================
      */
 
@@ -955,12 +1329,14 @@ class MainActivity : ComponentActivity() {
             WatchFirebaseMessagingService
                 .TYPE_RETURN_HOME_REQUEST -> {
 
+
                 val requestId =
                     intent
                         .getStringExtra(
                             WatchFirebaseMessagingService
                                 .EXTRA_REQUEST_ID
                         )
+
 
                 val pushGuardianId =
                     intent
@@ -969,6 +1345,7 @@ class MainActivity : ComponentActivity() {
                                 .EXTRA_GUARDIAN_ID
                         )
 
+
                 val pushWearerId =
                     intent
                         .getStringExtra(
@@ -976,66 +1353,20 @@ class MainActivity : ComponentActivity() {
                                 .EXTRA_WEARER_ID
                         )
 
-                if (
-                    requestId.isNullOrBlank()
-                ) {
-                    Log.w(
-                        "ReturnHomeFCM",
-                        "귀가 요청 request_id가 없습니다."
-                    )
-                    return
-                }
 
-                if (
-                    returnHomeRequestStore
-                        .isHandled(
-                            requestId
-                        )
-                ) {
-                    Log.d(
-                        "ReturnHomeFCM",
-                        "이미 처리된 귀가 요청 알림 클릭 무시: $requestId"
-                    )
+                showReturnHomeRequest(
 
-                    cancelReturnHomeNotification(
-                        requestId
-                    )
+                    requestId =
+                        requestId,
 
-                    return
-                }
+                    guardianId =
+                        pushGuardianId,
 
-                returnHomeRequestStore
-                    .markNotified(
-                        requestId
-                    )
+                    wearerId =
+                        pushWearerId,
 
-                cancelReturnHomeNotification(
-                    requestId
-                )
-
-                currentReturnHomeRequestIdState.value =
-                    requestId
-
-                if (
-                    !pushGuardianId.isNullOrBlank()
-                ) {
-                    guardianIdState.value =
-                        pushGuardianId
-                }
-
-                if (
-                    !pushWearerId.isNullOrBlank()
-                ) {
-                    wearerIdState.value =
-                        pushWearerId
-                }
-
-                currentScreenState.value =
-                    AppScreen.RETURN_HOME_REQUEST
-
-                Log.d(
-                    "ReturnHomeFCM",
-                    "귀가 요청 Notification 클릭 requestId=$requestId"
+                    source =
+                        "NOTIFICATION_CLICK",
                 )
             }
 
@@ -1065,6 +1396,135 @@ class MainActivity : ComponentActivity() {
 
     /*
      * =====================================================
+     * 귀가 요청 화면 공통 표시
+     * =====================================================
+     *
+     * Notification 클릭
+     * Foreground FCM
+     *
+     * 두 경로 모두 이 함수를 사용한다.
+     */
+
+    private fun showReturnHomeRequest(
+
+        requestId: String?,
+
+        guardianId: String?,
+
+        wearerId: String?,
+
+        source: String,
+    ) {
+
+
+        if (
+            requestId.isNullOrBlank()
+        ) {
+
+            Log.w(
+                "ReturnHomeFCM",
+                "귀가 요청 request_id가 없습니다. source=$source"
+            )
+
+
+            return
+        }
+
+
+        /*
+         * 이미 사용자가
+         * 집으로 가기를 눌러 처리한 요청이면 무시.
+         */
+        if (
+            returnHomeRequestStore
+                .isHandled(
+                    requestId
+                )
+        ) {
+
+            Log.d(
+                "ReturnHomeFCM",
+                "이미 처리된 귀가 요청 무시 " +
+                        "requestId=$requestId source=$source"
+            )
+
+
+            cancelReturnHomeNotification(
+                requestId
+            )
+
+
+            return
+        }
+
+
+        /*
+         * 이 요청을 이미 알렸다는 기록.
+         */
+        returnHomeRequestStore
+            .markNotified(
+                requestId
+            )
+
+
+        /*
+         * 혹시 동일 Notification이 있으면 제거.
+         */
+        cancelReturnHomeNotification(
+            requestId
+        )
+
+
+        /*
+         * 현재 요청 ID 저장.
+         */
+        currentReturnHomeRequestIdState.value =
+            requestId
+
+
+        /*
+         * FCM에서 같이 받은 페어링 정보 저장.
+         */
+        if (
+            !guardianId.isNullOrBlank()
+        ) {
+
+            guardianIdState.value =
+                guardianId
+        }
+
+
+        if (
+            !wearerId.isNullOrBlank()
+        ) {
+
+            wearerIdState.value =
+                wearerId
+        }
+
+
+        /*
+         * =================================================
+         * 핵심
+         * =================================================
+         *
+         * 앱이 현재 어떤 화면을 보고 있든
+         * 귀가 요청 화면으로 바로 변경.
+         */
+        currentScreenState.value =
+            AppScreen.RETURN_HOME_REQUEST
+
+
+        Log.d(
+            "ReturnHomeFCM",
+            "귀가 요청 화면 즉시 표시 " +
+                    "requestId=$requestId source=$source"
+        )
+    }
+
+
+    /*
+     * =====================================================
      * 동일 귀가 요청 Notification 제거
      * =====================================================
      */
@@ -1078,13 +1538,16 @@ class MainActivity : ComponentActivity() {
                 NotificationManager::class.java
             )
 
-        manager.cancel(
-            WatchFirebaseMessagingService
-                .notificationId(
-                    requestId
-                )
-        )
+
+        manager
+            .cancel(
+                WatchFirebaseMessagingService
+                    .notificationId(
+                        requestId
+                    )
+            )
     }
+
 
     /*
      * =====================================================
@@ -1103,7 +1566,8 @@ class MainActivity : ComponentActivity() {
                 null
             )
             .addOnSuccessListener {
-                    location: Location? ->
+                    location:
+                    Location? ->
 
 
                 if (
@@ -1123,15 +1587,117 @@ class MainActivity : ComponentActivity() {
      * =====================================================
      */
 
+    override fun onStart() {
+
+        super.onStart()
+
+
+        /*
+         * Foreground FCM Broadcast 수신 등록
+         */
+        if (
+            !returnHomePushReceiverRegistered
+        ) {
+
+            val filter =
+                IntentFilter(
+                    WatchFirebaseMessagingService
+                        .ACTION_RETURN_HOME_REQUEST_RECEIVED
+                )
+
+
+            ContextCompat
+                .registerReceiver(
+
+                    this,
+
+                    returnHomePushReceiver,
+
+                    filter,
+
+                    ContextCompat
+                        .RECEIVER_NOT_EXPORTED,
+                )
+
+
+            returnHomePushReceiverRegistered =
+                true
+
+
+            Log.d(
+                "ReturnHomeFCM",
+                "Foreground 귀가 요청 Receiver 등록"
+            )
+        }
+    }
+
+
     override fun onResume() {
+
         super.onResume()
-        isActivityResumed = true
+
+
+        isActivityResumed =
+            true
+
+
+        isInForeground =
+            true
+
+
+        Log.d(
+            "ReturnHomeFCM",
+            "MainActivity Foreground"
+        )
     }
 
 
     override fun onPause() {
-        isActivityResumed = false
+
+        isActivityResumed =
+            false
+
+
+        isInForeground =
+            false
+
+
+        Log.d(
+            "ReturnHomeFCM",
+            "MainActivity Background"
+        )
+
+
         super.onPause()
+    }
+
+
+    override fun onStop() {
+
+        /*
+         * Foreground Receiver 제거
+         */
+        if (
+            returnHomePushReceiverRegistered
+        ) {
+
+            unregisterReceiver(
+                returnHomePushReceiver
+            )
+
+
+            returnHomePushReceiverRegistered =
+                false
+
+
+            Log.d(
+                "ReturnHomeFCM",
+                "Foreground 귀가 요청 Receiver 해제"
+            )
+        }
+
+
+        super.onStop()
     }
 
 
@@ -1142,6 +1708,34 @@ class MainActivity : ComponentActivity() {
      */
 
     override fun onDestroy() {
+
+
+        isInForeground =
+            false
+
+
+        isActivityResumed =
+            false
+
+
+        /*
+         * 혹시 onStop 이전에 종료되는 경우를 대비.
+         */
+        if (
+            returnHomePushReceiverRegistered
+        ) {
+
+            runCatching {
+
+                unregisterReceiver(
+                    returnHomePushReceiver
+                )
+            }
+
+
+            returnHomePushReceiverRegistered =
+                false
+        }
 
 
         returnHomeRealtimeManager
@@ -1230,16 +1824,10 @@ fun EmergencyManager(
         (String) -> Unit,
 
 
-    /*
-     * 기존 안전구역 계산용
-     */
     myLocation:
     Location?,
 
 
-    /*
-     * 지속 GPS
-     */
     watchLocation:
     WatchLocation?,
 
@@ -1266,10 +1854,6 @@ fun EmergencyManager(
         LocalContext.current
 
 
-    /*
-     * Composable 버튼에서
-     * suspend 함수를 실행하기 위한 Scope
-     */
     val eventScope =
         rememberCoroutineScope()
 
@@ -1281,7 +1865,8 @@ fun EmergencyManager(
      */
 
     val guardianConnected =
-        guardianId != null && wearerId != null
+        guardianId != null &&
+                wearerId != null
 
 
     /*
@@ -1317,56 +1902,7 @@ fun EmergencyManager(
 
     /*
      * =====================================================
-     * GPS → Supabase
-     * =====================================================
-     *
-     * 첫 위치
-     * 또는
-     * 30m 이동
-     * 또는
-     * 1분 경과
-     */
-
-    LaunchedEffect(
-        guardianConnected,
-        watchLocation
-    ) {
-
-
-        if (
-            !guardianConnected
-        ) {
-
-            return@LaunchedEffect
-        }
-
-
-        val currentLocation =
-            watchLocation
-                ?: return@LaunchedEffect
-
-
-        runCatching {
-
-            watchLocationSyncManager
-                .syncIfNeeded(
-                    currentLocation
-                )
-
-        }.onFailure { error ->
-
-            Log.w(
-                "WatchLocationSync",
-                "위치 동기화 실패: ${error.message}",
-                error
-            )
-        }
-    }
-
-
-    /*
-     * =====================================================
-     * DB에서 조회한 실제 집 위치
+     * DB에서 조회한 실제 HOME 위치
      * =====================================================
      */
 
@@ -1375,12 +1911,25 @@ fun EmergencyManager(
             homeLatitude,
             homeLongitude
         ) {
-            if (homeLatitude != null && homeLongitude != null) {
-                Location("").apply {
-                    latitude = homeLatitude
-                    longitude = homeLongitude
+
+            if (
+                homeLatitude != null &&
+                homeLongitude != null
+            ) {
+
+                Location(
+                    ""
+                ).apply {
+
+                    latitude =
+                        homeLatitude
+
+                    longitude =
+                        homeLongitude
                 }
+
             } else {
+
                 null
             }
         }
@@ -1394,7 +1943,10 @@ fun EmergencyManager(
 
     var hasTriggeredSafeZoneAlert by
     remember {
-        mutableStateOf(false)
+
+        mutableStateOf(
+            false
+        )
     }
 
 
@@ -1403,63 +1955,52 @@ fun EmergencyManager(
         homeLocation,
         homeRadiusMeters
     ) {
-        val currentLocation = myLocation ?: return@LaunchedEffect
-        val currentHome = homeLocation ?: return@LaunchedEffect
-        val radius = homeRadiusMeters ?: return@LaunchedEffect
+
+        val currentLocation =
+            myLocation
+                ?: return@LaunchedEffect
+
+
+        val currentHome =
+            homeLocation
+                ?: return@LaunchedEffect
+
+
+        val radius =
+            homeRadiusMeters
+                ?: return@LaunchedEffect
+
 
         val distance =
-            currentLocation.distanceTo(currentHome)
-
-        if (
-            distance > radius.toFloat() &&
-            !hasTriggeredSafeZoneAlert
-        ) {
-            hasTriggeredSafeZoneAlert = true
-            onScreenChange(AppScreen.OUT_OF_SAFE_ZONE)
-        } else if (distance <= radius.toFloat()) {
-            hasTriggeredSafeZoneAlert = false
-        }
-    }
-
-
-    /*
-     * =====================================================
-     * 심박수 이상 → 구조요청
-     *
-     * 현재 비활성화
-     * =====================================================
-     */
-
-    /*
-    var hasTriggeredHeartRateAlert by
-        remember {
-            mutableStateOf(false)
-        }
-
-    LaunchedEffect(heartRate) {
-
-        if (heartRate != null) {
-
-            if (
-                (heartRate < 50f || heartRate > 90f) &&
-                !hasTriggeredHeartRateAlert
-            ) {
-
-                hasTriggeredHeartRateAlert = true
-
-                onScreenChange(
-                    AppScreen.FALL_DETECTED
+            currentLocation
+                .distanceTo(
+                    currentHome
                 )
 
-            } else if (
-                heartRate in 50f..90f
-            ) {
 
-                hasTriggeredHeartRateAlert = false
-            }
+        if (
+            distance >
+            radius.toFloat() &&
+            !hasTriggeredSafeZoneAlert
+        ) {
+
+            hasTriggeredSafeZoneAlert =
+                true
+
+
+            onScreenChange(
+                AppScreen.OUT_OF_SAFE_ZONE
+            )
+
+        } else if (
+            distance <=
+            radius.toFloat()
+        ) {
+
+            hasTriggeredSafeZoneAlert =
+                false
         }
     }
-    */
 
 
     /*
@@ -1486,27 +2027,24 @@ fun EmergencyManager(
                 guardianConnected =
                     guardianConnected,
 
+
                 onGoHomeClick = {
 
                     onClearReturnHomeRequest()
+
 
                     onScreenChange(
                         AppScreen.COMPASS
                     )
                 },
 
-                /*
-                 * 홈 SOS 버튼
-                 */
+
                 onSosClick = {
 
                     val locationSnapshot =
                         watchLocation
 
 
-                    /*
-                     * 우선 화면 즉시 전환
-                     */
                     onScreenChange(
                         AppScreen.SOS_SENT
                     )
@@ -1514,9 +2052,7 @@ fun EmergencyManager(
 
                     eventScope.launch {
 
-                        /*
-                         * SOS 발생 순간 위치 강제 저장
-                         */
+
                         if (
                             locationSnapshot != null
                         ) {
@@ -1539,10 +2075,6 @@ fun EmergencyManager(
                         }
 
 
-                        /*
-                         * safety_events에
-                         * SOS_MANUAL 저장
-                         */
                         runCatching {
 
                             watchSafetyEventManager
@@ -1560,6 +2092,7 @@ fun EmergencyManager(
                         }
                     }
                 },
+
 
                 onGuardianConnectClick = {
 
@@ -1593,6 +2126,7 @@ fun EmergencyManager(
                 onConnected = {
 
                     onPairingCompleted()
+
 
                     onScreenChange(
                         AppScreen.PAIRING_SUCCESS
@@ -1633,57 +2167,99 @@ fun EmergencyManager(
             ReturnHomeRequestScreen(
 
                 onGoHomeClick = {
-                    val requestId = returnHomeRequestId
-                    val currentGuardianId = guardianId
-                    val currentWearerId = wearerId
+
+
+                    val requestId =
+                        returnHomeRequestId
+
+
+                    val currentGuardianId =
+                        guardianId
+
+
+                    val currentWearerId =
+                        wearerId
+
 
                     if (
                         requestId == null ||
                         currentGuardianId == null ||
                         currentWearerId == null
                     ) {
-                        Toast.makeText(
-                            context,
-                            "귀가 요청 정보를 확인할 수 없습니다.",
-                            Toast.LENGTH_SHORT
-                        ).show()
+
+                        Toast
+                            .makeText(
+                                context,
+                                "귀가 요청 정보를 확인할 수 없습니다.",
+                                Toast.LENGTH_SHORT
+                            )
+                            .show()
+
                     } else {
+
                         eventScope.launch {
+
                             runCatching {
-                                returnHomeRealtimeManager.acceptRequest(
-                                    requestId = requestId,
-                                    guardianId = currentGuardianId,
-                                    wearerId = currentWearerId
-                                )
+
+                                returnHomeRealtimeManager
+                                    .acceptRequest(
+
+                                        requestId =
+                                            requestId,
+
+                                        guardianId =
+                                            currentGuardianId,
+
+                                        wearerId =
+                                            currentWearerId
+                                    )
+
                             }.onSuccess {
+
 
                                 onReturnHomeRequestAccepted(
                                     requestId
                                 )
+
 
                                 Log.d(
                                     "ReturnHome",
                                     "귀가 요청 ACCEPTED 성공: $requestId"
                                 )
 
+
                                 onScreenChange(
                                     AppScreen.COMPASS
                                 )
 
+
                             }.onFailure { error ->
-                                Log.e("ReturnHome", "귀가 요청 수락 실패", error)
-                                Toast.makeText(
-                                    context,
-                                    "귀가 요청 수락에 실패했습니다.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+
+                                Log.e(
+                                    "ReturnHome",
+                                    "귀가 요청 수락 실패",
+                                    error
+                                )
+
+
+                                Toast
+                                    .makeText(
+                                        context,
+                                        "귀가 요청 수락에 실패했습니다.",
+                                        Toast.LENGTH_SHORT
+                                    )
+                                    .show()
                             }
                         }
                     }
                 },
 
+
                 onDismissClick = {
-                    onScreenChange(AppScreen.HOME)
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
                 }
             )
         }
@@ -1700,20 +2276,12 @@ fun EmergencyManager(
             FallDetectScreen(
 
 
-                /*
-                 * -----------------------------------------
-                 * 괜찮아요
-                 * -----------------------------------------
-                 */
                 onOkayClick = {
 
                     val locationSnapshot =
                         watchLocation
 
 
-                    /*
-                     * 화면은 바로 홈으로
-                     */
                     FallEventState
                         .reset()
 
@@ -1723,9 +2291,6 @@ fun EmergencyManager(
                     )
 
 
-                    /*
-                     * 안전 확인 이벤트 저장
-                     */
                     eventScope.launch {
 
                         runCatching {
@@ -1747,20 +2312,12 @@ fun EmergencyManager(
                 },
 
 
-                /*
-                 * -----------------------------------------
-                 * 도와주세요
-                 * -----------------------------------------
-                 */
                 onHelpClick = {
 
                     val locationSnapshot =
                         watchLocation
 
 
-                    /*
-                     * 화면은 바로 SOS 완료로 이동
-                     */
                     onScreenChange(
                         AppScreen.SOS_SENT
                     )
@@ -1769,9 +2326,6 @@ fun EmergencyManager(
                     eventScope.launch {
 
 
-                        /*
-                         * SOS 순간 GPS 강제 저장
-                         */
                         if (
                             locationSnapshot != null
                         ) {
@@ -1794,9 +2348,6 @@ fun EmergencyManager(
                         }
 
 
-                        /*
-                         * 수동 SOS 이벤트
-                         */
                         runCatching {
 
                             watchSafetyEventManager
@@ -1816,11 +2367,6 @@ fun EmergencyManager(
                 },
 
 
-                /*
-                 * -----------------------------------------
-                 * 10초 무응답
-                 * -----------------------------------------
-                 */
                 onTimeout = {
 
                     val locationSnapshot =
@@ -1835,9 +2381,6 @@ fun EmergencyManager(
                     eventScope.launch {
 
 
-                        /*
-                         * 자동 SOS 순간 GPS 강제 저장
-                         */
                         if (
                             locationSnapshot != null
                         ) {
@@ -1860,9 +2403,6 @@ fun EmergencyManager(
                         }
 
 
-                        /*
-                         * 자동 SOS 이벤트 저장
-                         */
                         runCatching {
 
                             watchSafetyEventManager
@@ -1917,12 +2457,24 @@ fun EmergencyManager(
         AppScreen.COMPASS -> {
 
             TmapRouteTestScreen(
-                returnHomeRequestId = returnHomeRequestId,
-                returnHomeRealtimeManager = returnHomeRealtimeManager,
-                guardianId = guardianId,
-                wearerId = wearerId,
-                homeLatitude = homeLatitude,
-                homeLongitude = homeLongitude
+
+                returnHomeRequestId =
+                    returnHomeRequestId,
+
+                returnHomeRealtimeManager =
+                    returnHomeRealtimeManager,
+
+                guardianId =
+                    guardianId,
+
+                wearerId =
+                    wearerId,
+
+                homeLatitude =
+                    homeLatitude,
+
+                homeLongitude =
+                    homeLongitude
             )
         }
 
@@ -1940,6 +2492,7 @@ fun EmergencyManager(
                 onGoHomeClick = {
 
                     onClearReturnHomeRequest()
+
 
                     onScreenChange(
                         AppScreen.COMPASS
@@ -1979,6 +2532,7 @@ fun EmergencyManager(
             MedicationAlertScreen(
 
                 onTakenClick = {
+
 
                     val currentDate =
                         java.text
@@ -2043,97 +2597,247 @@ fun ReturnHomeRequestScreen(
     val context =
         LocalContext.current
 
+
     val vibrator =
         remember {
-            context.getSystemService(
-                Context.VIBRATOR_SERVICE
-            ) as android.os.Vibrator
+
+            context
+                .getSystemService(
+                    Context.VIBRATOR_SERVICE
+                ) as android.os.Vibrator
         }
 
-    LaunchedEffect(Unit) {
-        val pattern =
-            longArrayOf(0, 350, 150, 350, 150, 600)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(
-                VibrationEffect.createWaveform(pattern, -1)
+    LaunchedEffect(
+        Unit
+    ) {
+
+        val pattern =
+            longArrayOf(
+                0,
+                350,
+                150,
+                350,
+                150,
+                600
             )
+
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
+
+            vibrator.vibrate(
+
+                VibrationEffect
+                    .createWaveform(
+                        pattern,
+                        -1
+                    )
+            )
+
         } else {
+
             @Suppress("DEPRECATION")
-            vibrator.vibrate(pattern, -1)
+
+            vibrator.vibrate(
+                pattern,
+                -1
+            )
         }
     }
 
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF1976D2))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xFF1976D2
+                    )
+                )
+                .padding(
+                    16.dp
+                ),
+
+        verticalArrangement =
+            Arrangement.Center,
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+
     ) {
+
         Icon(
-            imageVector = Icons.Default.Home,
-            contentDescription = "귀가 요청",
-            modifier = Modifier.size(36.dp),
-            tint = Color.White
+
+            imageVector =
+                Icons.Default.Home,
+
+            contentDescription =
+                "귀가 요청",
+
+            modifier =
+                Modifier.size(
+                    36.dp
+                ),
+
+            tint =
+                Color.White
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    6.dp
+                )
+        )
+
 
         Text(
-            text = "보호자가 귀가를\n요청했어요",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+
+            text =
+                "보호자가 귀가를\n요청했어요",
+
+            color =
+                Color.White,
+
+            fontSize =
+                16.sp,
+
+            fontWeight =
+                FontWeight.Bold,
+
+            textAlign =
+                TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    14.dp
+                )
+        )
+
 
         Button(
-            onClick = onGoHomeClick,
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = Color.White,
-                contentColor = Color(0xFF1976D2)
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
+
+            onClick =
+                onGoHomeClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color.White,
+
+                        contentColor =
+                            Color(
+                                0xFF1976D2
+                            )
+                    ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        40.dp
+                    )
+
         ) {
+
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+
+                verticalAlignment =
+                    Alignment.CenterVertically,
+
+                horizontalArrangement =
+                    Arrangement.Center
             ) {
+
                 Icon(
-                    imageVector = Icons.Default.Home,
-                    contentDescription = "집으로 가기",
-                    modifier = Modifier.size(16.dp)
+
+                    imageVector =
+                        Icons.Default.Home,
+
+                    contentDescription =
+                        "집으로 가기",
+
+                    modifier =
+                        Modifier.size(
+                            16.dp
+                        )
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+
+
+                Spacer(
+                    modifier =
+                        Modifier.width(
+                            4.dp
+                        )
+                )
+
+
                 Text(
-                    text = "집으로 가기",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
+
+                    text =
+                        "집으로 가기",
+
+                    fontSize =
+                        14.sp,
+
+                    fontWeight =
+                        FontWeight.Bold
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    6.dp
+                )
+        )
+
 
         Button(
-            onClick = onDismissClick,
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = Color.DarkGray,
-                contentColor = Color.White
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(32.dp)
+
+            onClick =
+                onDismissClick,
+
+            colors =
+                ButtonDefaults
+                    .buttonColors(
+
+                        backgroundColor =
+                            Color.DarkGray,
+
+                        contentColor =
+                            Color.White
+                    ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        32.dp
+                    )
+
         ) {
+
             Text(
-                text = "나중에",
-                fontSize = 12.sp
+
+                text =
+                    "나중에",
+
+                fontSize =
+                    12.sp
             )
         }
     }
@@ -2260,7 +2964,6 @@ fun OutOfSafeZoneScreen(
 
                 verticalAlignment =
                     Alignment.CenterVertically
-
             ) {
 
                 Icon(
@@ -2387,6 +3090,7 @@ fun FallDetectScreen(
             delay(
                 1000L
             )
+
 
             timeLeft--
 
@@ -3072,7 +3776,6 @@ fun CompassScreen(
 
                 verticalAlignment =
                     Alignment.CenterVertically
-
             ) {
 
                 Icon(
@@ -3288,7 +3991,6 @@ fun MedicationAlertScreen(
 
                 verticalAlignment =
                     Alignment.CenterVertically
-
             ) {
 
                 Icon(
@@ -3366,7 +4068,6 @@ fun MedicationAlertScreen(
 
                 verticalAlignment =
                     Alignment.CenterVertically
-
             ) {
 
                 Icon(

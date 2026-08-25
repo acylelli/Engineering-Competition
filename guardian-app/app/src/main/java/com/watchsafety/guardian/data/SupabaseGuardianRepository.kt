@@ -263,52 +263,204 @@ class SupabaseGuardianRepository(
     }
 
     override suspend fun addSafeZone(
+
         name: String,
+
         radiusMeters: Int,
-    ) {
+
+        latitude: Double,
+
+        longitude: Double,
+
+        isHome: Boolean,
+
+        ) {
 
         val current =
             snapshot.value
+
 
         if (
             current.safeZones.size >= 5
         ) {
 
-            return
+            error(
+                "안전구역은 최대 5개까지 등록할 수 있습니다."
+            )
+        }
+
+
+        val normalizedName =
+            name.trim()
+
+
+        require(
+            normalizedName.isNotBlank()
+        ) {
+
+            "안전구역 이름을 입력해주세요."
+        }
+
+
+        require(
+            latitude in -90.0..90.0
+        ) {
+
+            "올바르지 않은 위도입니다."
+        }
+
+
+        require(
+            longitude in -180.0..180.0
+        ) {
+
+            "올바르지 않은 경도입니다."
+        }
+
+
+        val wearer =
+            requireWearerId()
+
+
+        /*
+         * =====================================================
+         * DB RPC
+         * =====================================================
+         *
+         * HOME이면:
+         *
+         * 기존 HOME → OTHER
+         * 새 안전구역 → HOME
+         *
+         * 과정을 DB Transaction 하나로 처리한다.
+         */
+
+        val parameters =
+            buildJsonObject {
+
+                put(
+                    "p_wearer_id",
+                    wearer
+                )
+
+                put(
+                    "p_name",
+                    normalizedName
+                )
+
+                put(
+                    "p_radius_meters",
+                    radiusMeters
+                        .coerceIn(
+                            100,
+                            1000
+                        )
+                )
+
+                put(
+                    "p_latitude",
+                    latitude
+                )
+
+                put(
+                    "p_longitude",
+                    longitude
+                )
+
+                put(
+                    "p_is_home",
+                    isHome
+                )
+            }
+
+
+        supabase
+            .postgrest
+            .rpc(
+
+                function =
+                    "add_guardian_safe_zone",
+
+                parameters =
+                    parameters,
+            )
+
+
+        Log.d(
+
+            TAG,
+
+            "안전구역 저장 완료 " +
+                    "name=$normalizedName, " +
+                    "lat=$latitude, " +
+                    "lng=$longitude, " +
+                    "isHome=$isHome"
+        )
+
+
+        loadSnapshot()
+    }
+
+    /*
+     * =====================================================
+     * 착용자 이름 변경
+     * =====================================================
+     */
+
+    override suspend fun updateWearerName(
+        name: String,
+    ) {
+
+        val normalizedName =
+            name.trim()
+
+        require(
+            normalizedName.isNotBlank()
+        ) {
+            "착용자 이름을 입력해주세요."
+        }
+
+        require(
+            normalizedName.length <= 20
+        ) {
+            "착용자 이름은 20자 이하로 입력해주세요."
         }
 
         supabase
             .from(
-                "safe_zones"
+                "wearers"
             )
-            .insert(
-                SafeZoneInsertDto(
-                    guardianId =
-                        requireGuardianId(),
-                    wearerId =
-                        requireWearerId(),
-                    name =
-                        name,
-                    address =
-                        "지도에서 선택한 위치",
-                    centerLatitude =
-                        current.location.latitude,
-                    centerLongitude =
-                        current.location.longitude,
-                    radiusMeters =
-                        radiusMeters.coerceIn(
-                            100,
-                            1_000
-                        ),
-                    enabled =
-                        true,
-                    kind =
-                        "OTHER",
-                )
-            )
+            .update(
+                {
+                    set(
+                        "name",
+                        normalizedName
+                    )
+                },
+            ) {
+
+                filter {
+
+                    eq(
+                        "id",
+                        requireWearerId()
+                    )
+
+                    eq(
+                        "guardian_id",
+                        requireGuardianId()
+                    )
+                }
+            }
+
+        Log.d(
+            TAG,
+            "착용자 이름 변경 완료: $normalizedName"
+        )
 
         loadSnapshot()
     }
+
 
     /*
      * =====================================================
@@ -1164,14 +1316,18 @@ class SupabaseGuardianRepository(
                 enabled,
             kind =
                 runCatching {
-                    SafeZoneKind
-                        .valueOf(
-                            kind
-                        )
+                    SafeZoneKind.valueOf(
+                        kind
+                    )
                 }.getOrDefault(
                     SafeZoneKind.OTHER
                 ),
+            centerLatitude =
+                centerLatitude,
+            centerLongitude =
+                centerLongitude,
         )
+
 
     private fun SafetyEventDto.toDomain():
             SafetyEvent? {

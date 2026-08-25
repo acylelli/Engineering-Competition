@@ -45,6 +45,16 @@ class WatchFirebaseMessagingService :
             "귀가 요청"
 
 
+        /*
+         * =================================================
+         * MainActivity에 직접 전달할 Broadcast
+         * =================================================
+         */
+
+        const val ACTION_RETURN_HOME_REQUEST_RECEIVED =
+            "com.example.watchsafety.action.RETURN_HOME_REQUEST_RECEIVED"
+
+
         const val EXTRA_EMERGENCY_TYPE =
             "EMERGENCY_TYPE"
 
@@ -62,10 +72,6 @@ class WatchFirebaseMessagingService :
             "RETURN_HOME_REQUEST"
 
 
-        /*
-         * 같은 request_id로
-         * 항상 같은 Notification ID 사용
-         */
         fun notificationId(
             requestId: String
         ): Int {
@@ -184,7 +190,7 @@ class WatchFirebaseMessagingService :
 
         /*
          * =================================================
-         * 중복 방지 Store
+         * 중복 방지
          * =================================================
          */
 
@@ -214,8 +220,8 @@ class WatchFirebaseMessagingService :
 
 
         /*
-         * 이미 FCM 또는 Realtime에서
-         * 알림/화면 처리를 시작한 요청
+         * Realtime에서 이미 처리한 요청이라면
+         * FCM 중복 처리하지 않는다.
          */
         if (
             requestStore
@@ -233,10 +239,6 @@ class WatchFirebaseMessagingService :
         }
 
 
-        /*
-         * 먼저 기록해두고
-         * 그 다음 알림을 표시한다.
-         */
         requestStore
             .markNotified(
                 requestId
@@ -246,6 +248,54 @@ class WatchFirebaseMessagingService :
         Log.d(
             TAG,
             "신규 귀가 요청 FCM 수신: $requestId"
+        )
+
+
+        /*
+         * =================================================
+         * 앱이 현재 화면에 떠 있는 경우
+         * =================================================
+         *
+         * Notification을 띄우지 않고
+         * MainActivity로 즉시 전달한다.
+         */
+
+        if (
+            MainActivity.isInForeground
+        ) {
+
+            Log.d(
+                TAG,
+                "워치 앱 Foreground → 귀가 요청 화면 즉시 표시"
+            )
+
+
+            sendReturnHomeForegroundBroadcast(
+
+                requestId =
+                    requestId,
+
+                guardianId =
+                    guardianId,
+
+                wearerId =
+                    wearerId,
+            )
+
+
+            return
+        }
+
+
+        /*
+         * =================================================
+         * 앱이 Background인 경우
+         * =================================================
+         */
+
+        Log.d(
+            TAG,
+            "워치 앱 Background → 귀가 요청 Notification 표시"
         )
 
 
@@ -264,7 +314,69 @@ class WatchFirebaseMessagingService :
                 guardianId,
 
             wearerId =
-                wearerId
+                wearerId,
+        )
+    }
+
+
+    /*
+     * =====================================================
+     * Foreground Activity 전달
+     * =====================================================
+     */
+
+    private fun sendReturnHomeForegroundBroadcast(
+
+        requestId: String,
+
+        guardianId: String,
+
+        wearerId: String,
+    ) {
+
+        val intent =
+            Intent(
+                ACTION_RETURN_HOME_REQUEST_RECEIVED
+            ).apply {
+
+                setPackage(
+                    packageName
+                )
+
+
+                putExtra(
+                    EXTRA_EMERGENCY_TYPE,
+                    TYPE_RETURN_HOME_REQUEST
+                )
+
+
+                putExtra(
+                    EXTRA_REQUEST_ID,
+                    requestId
+                )
+
+
+                putExtra(
+                    EXTRA_GUARDIAN_ID,
+                    guardianId
+                )
+
+
+                putExtra(
+                    EXTRA_WEARER_ID,
+                    wearerId
+                )
+            }
+
+
+        sendBroadcast(
+            intent
+        )
+
+
+        Log.d(
+            TAG,
+            "Foreground 귀가 요청 Broadcast 전송 requestId=$requestId"
         )
     }
 
@@ -277,9 +389,7 @@ class WatchFirebaseMessagingService :
 
     private fun createReturnHomeChannel() {
 
-
         val manager =
-
             getSystemService(
                 NotificationManager::class.java
             )
@@ -345,7 +455,6 @@ class WatchFirebaseMessagingService :
      */
 
     private fun vibrateReturnHomeRequest() {
-
 
         val vibrator =
 
@@ -431,10 +540,8 @@ class WatchFirebaseMessagingService :
 
         guardianId: String,
 
-        wearerId: String
-
+        wearerId: String,
     ) {
-
 
         val intent =
             Intent(
@@ -445,9 +552,7 @@ class WatchFirebaseMessagingService :
                 flags =
 
                     Intent.FLAG_ACTIVITY_NEW_TASK or
-
                             Intent.FLAG_ACTIVITY_CLEAR_TOP or
-
                             Intent.FLAG_ACTIVITY_SINGLE_TOP
 
 

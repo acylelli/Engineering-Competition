@@ -123,6 +123,23 @@ android {
                     )
             )
         )
+
+        /*
+         * =================================================
+         * Tmap api
+         * =================================================
+         */
+
+        buildConfigField(
+            "String",
+            "TMAP_APP_KEY",
+            buildConfigString(
+                localProperties.getProperty(
+                    "TMAP_APP_KEY",
+                    ""
+                )
+            )
+        )
     }
 
 
@@ -290,6 +307,22 @@ dependencies {
 
     implementation(
         "com.kakao.sdk:v2-user:2.24.0"
+    )
+    /*
+ * =====================================================
+ * TMAP Vector Map SDK
+ * =====================================================
+ */
+
+    implementation(
+        fileTree(
+            mapOf(
+                "dir" to "libs",
+                "include" to listOf(
+                    "*.aar"
+                ),
+            )
+        )
     )
 
 

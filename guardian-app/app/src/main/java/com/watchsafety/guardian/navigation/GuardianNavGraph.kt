@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 
 import com.watchsafety.guardian.domain.model.GuardianSnapshot
 import com.watchsafety.guardian.domain.model.NotificationSettings
+import com.watchsafety.guardian.domain.model.SafeZoneKind
 
 import com.watchsafety.guardian.ui.PairingUiState
 
@@ -22,6 +23,7 @@ import com.watchsafety.guardian.ui.safezone.AddSafeZoneScreen
 import com.watchsafety.guardian.ui.safezone.SafeZoneListScreen
 import com.watchsafety.guardian.ui.settings.SettingsScreen
 import com.watchsafety.guardian.ui.status.UserStatusScreen
+
 
 @Composable
 fun GuardianNavGraph(
@@ -44,17 +46,30 @@ fun GuardianNavGraph(
     onSafeZoneEnabledChange:
         (String, Boolean) -> Unit,
 
+    /*
+     * =====================================================
+     * 안전구역 추가
+     * =====================================================
+     *
+     * 마지막 Boolean
+     *
+     * true  -> HOME
+     * false -> OTHER
+     */
     onAddSafeZone:
-        (String, Int) -> Unit,
+        (
+        String,
+        Int,
+        Double,
+        Double,
+        Boolean,
+    ) -> Unit,
+
+    onWearerNameChange:
+        (String) -> Unit,
 
     onNotificationSettingsChange:
         (NotificationSettings) -> Unit,
-
-    /*
-     * -----------------------------------------------------
-     * 워치 페어링
-     * -----------------------------------------------------
-     */
 
     pairingState:
     PairingUiState,
@@ -69,7 +84,9 @@ fun GuardianNavGraph(
     Modifier = Modifier,
 
     ) {
+
     NavHost(
+
         navController =
             navController,
 
@@ -80,21 +97,25 @@ fun GuardianNavGraph(
             modifier,
     ) {
 
+
         /*
-         * =================================================
+         * =====================================================
          * 홈
-         * =================================================
+         * =====================================================
          */
 
         composable(
             GuardianRoute.HOME
         ) {
+
             HomeScreen(
+
                 state =
                     snapshot
                         .toHomeUiState(),
 
                 onMapClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.MAP
@@ -102,6 +123,7 @@ fun GuardianNavGraph(
                 },
 
                 onSafeZonesClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.SAFE_ZONES
@@ -109,6 +131,7 @@ fun GuardianNavGraph(
                 },
 
                 onReturnHomeClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.MAP
@@ -116,6 +139,7 @@ fun GuardianNavGraph(
                 },
 
                 onHistoryClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.HISTORY
@@ -123,6 +147,7 @@ fun GuardianNavGraph(
                 },
 
                 onNotificationsClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.HISTORY
@@ -131,16 +156,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
-         * 지도
-         * =================================================
+         * =====================================================
+         * 현재 위치 / 귀가 요청
+         * =====================================================
          */
 
         composable(
             GuardianRoute.MAP
         ) {
+
             CurrentLocationScreen(
+
                 user =
                     snapshot.user,
 
@@ -150,13 +178,14 @@ fun GuardianNavGraph(
                 location =
                     snapshot.location,
 
+                safeZones =
+                    snapshot.safeZones,
+
                 returnHomeRequested =
-                    snapshot
-                        .returnHomeRequested,
+                    snapshot.returnHomeRequested,
 
                 returnHomeStatus =
-                    snapshot
-                        .returnHomeStatus,
+                    snapshot.returnHomeStatus,
 
                 isRefreshing =
                     isRefreshing,
@@ -173,20 +202,24 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
-         * 이벤트
-         * =================================================
+         * =====================================================
+         * 이벤트 기록
+         * =====================================================
          */
 
         composable(
             GuardianRoute.HISTORY
         ) {
+
             HistoryScreen(
+
                 events =
                     snapshot.events,
 
                 onEmergencyClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.EMERGENCY
@@ -195,16 +228,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
+         * =====================================================
          * 설정
-         * =================================================
+         * =====================================================
          */
 
         composable(
             GuardianRoute.SETTINGS
         ) {
+
             SettingsScreen(
+
                 user =
                     snapshot.user,
 
@@ -212,13 +248,13 @@ fun GuardianNavGraph(
                     snapshot.watchStatus,
 
                 settings =
-                    snapshot
-                        .notificationSettings,
+                    snapshot.notificationSettings,
 
                 onSettingsChange =
                     onNotificationSettingsChange,
 
                 onUserStatusClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.USER_STATUS
@@ -226,6 +262,7 @@ fun GuardianNavGraph(
                 },
 
                 onSafeZonesClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.SAFE_ZONES
@@ -233,6 +270,7 @@ fun GuardianNavGraph(
                 },
 
                 onWatchPairingClick = {
+
                     onResetPairingState()
 
                     navController
@@ -243,16 +281,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
-         * 워치 연결
-         * =================================================
+         * =====================================================
+         * 워치 페어링
+         * =====================================================
          */
 
         composable(
             GuardianRoute.WATCH_PAIRING
         ) {
+
             WatchPairingScreen(
+
                 state =
                     pairingState,
 
@@ -260,6 +301,7 @@ fun GuardianNavGraph(
                     onPairingCodeSubmit,
 
                 onBack = {
+
                     onResetPairingState()
 
                     navController
@@ -267,6 +309,7 @@ fun GuardianNavGraph(
                 },
 
                 onSuccessFinished = {
+
                     onResetPairingState()
 
                     navController
@@ -275,16 +318,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
+         * =====================================================
          * 안전구역 목록
-         * =================================================
+         * =====================================================
          */
 
         composable(
             GuardianRoute.SAFE_ZONES
         ) {
+
             SafeZoneListScreen(
+
                 zones =
                     snapshot.safeZones,
 
@@ -296,6 +342,7 @@ fun GuardianNavGraph(
                     popBackStack,
 
                 onAddClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.SAFE_ZONE_ADD
@@ -304,28 +351,82 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
+         * =====================================================
          * 안전구역 추가
-         * =================================================
+         * =====================================================
          */
 
         composable(
             GuardianRoute.SAFE_ZONE_ADD
         ) {
+
+            /*
+             * 현재 HOME으로 지정되어 있는
+             * 안전구역 이름을 찾는다.
+             *
+             * HOME이 없다면 null.
+             */
+            val existingHomeName =
+
+                snapshot
+                    .safeZones
+                    .firstOrNull { zone ->
+
+                        zone.kind ==
+                                SafeZoneKind.HOME
+                    }
+                    ?.name
+
+
             AddSafeZoneScreen(
+
+                initialLatitude =
+                    snapshot.location.latitude,
+
+                initialLongitude =
+                    snapshot.location.longitude,
+
+                /*
+                 * 기존 HOME 이름 전달
+                 *
+                 * 새 안전구역에서
+                 * "집으로 지정"을 켜면
+                 * 기존 집이 교체된다는 안내에 사용.
+                 */
+                existingHomeName =
+                    existingHomeName,
+
                 onBack =
                     navController::
                     popBackStack,
 
                 onSave = {
                         name,
-                        radius ->
+                        radius,
+                        latitude,
+                        longitude,
+                        isHome ->
 
+
+                    /*
+                     * ViewModel / Repository까지
+                     * isHome 전달
+                     */
                     onAddSafeZone(
+
                         name,
-                        radius
+
+                        radius,
+
+                        latitude,
+
+                        longitude,
+
+                        isHome,
                     )
+
 
                     navController
                         .popBackStack()
@@ -333,16 +434,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
-         * 긴급
-         * =================================================
+         * =====================================================
+         * 긴급 상황
+         * =====================================================
          */
 
         composable(
             GuardianRoute.EMERGENCY
         ) {
+
             EmergencyScreen(
+
                 detail =
                     snapshot.emergency,
 
@@ -351,6 +455,7 @@ fun GuardianNavGraph(
                     popBackStack,
 
                 onMapClick = {
+
                     navController
                         .navigate(
                             GuardianRoute.MAP
@@ -359,16 +464,19 @@ fun GuardianNavGraph(
             )
         }
 
+
         /*
-         * =================================================
-         * 사용자 상태
-         * =================================================
+         * =====================================================
+         * 착용자 상태
+         * =====================================================
          */
 
         composable(
             GuardianRoute.USER_STATUS
         ) {
+
             UserStatusScreen(
+
                 user =
                     snapshot.user,
 
@@ -383,6 +491,9 @@ fun GuardianNavGraph(
 
                 onRefreshClick =
                     onRefreshStatus,
+
+                onWearerNameChange =
+                    onWearerNameChange,
 
                 onBack =
                     navController::

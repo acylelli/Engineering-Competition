@@ -66,6 +66,10 @@
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
 
+    <!--
+        WatchTrackingService가
+        백그라운드에서 GPS를 사용하기 위해 필요
+    -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
@@ -181,6 +185,8 @@
 
         <!-- =================================================
              기존 안전 Foreground Service
+
+             심박 / 안전 기능
              ================================================= -->
 
         <service
@@ -190,6 +196,30 @@
             android:exported="false"
 
             android:foregroundServiceType="health|location" />
+
+
+        <!-- =================================================
+             백그라운드 위치 추적 Foreground Service
+
+             워치 화면이 꺼지거나
+             MainActivity가 화면에서 사라져도
+
+             GPS
+               ↓
+             WatchLocationSyncManager
+               ↓
+             Supabase locations
+
+             동기화를 계속 수행
+             ================================================= -->
+
+        <service
+
+            android:name=".location.WatchTrackingService"
+
+            android:exported="false"
+
+            android:foregroundServiceType="location" />
 
 
         <!-- =================================================
@@ -204,6 +234,7 @@
             android:name=".notification.WatchFirebaseMessagingService"
 
             android:exported="false">
+
 
             <intent-filter>
 

@@ -441,6 +441,15 @@ fun GuardianApp(
 
 
             /*
+             * 착용자 이름 변경
+             */
+
+            onWearerNameChange =
+                guardianViewModel::
+                updateWearerName,
+
+
+            /*
              * 알림 설정
              */
 

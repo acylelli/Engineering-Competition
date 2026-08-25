@@ -246,20 +246,57 @@ class GuardianViewModel(
 
     fun addSafeZone(
 
-        name:
-        String,
+        name: String,
 
-        radiusMeters:
-        Int,
+        radiusMeters: Int,
+
+        latitude: Double,
+
+        longitude: Double,
+
+        isHome: Boolean,
 
         ) {
 
         launchRepositoryAction {
 
-            repository
-                .addSafeZone(
+            repository.addSafeZone(
+
+                name =
                     name,
+
+                radiusMeters =
                     radiusMeters,
+
+                latitude =
+                    latitude,
+
+                longitude =
+                    longitude,
+
+                isHome =
+                    isHome,
+            )
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 착용자 이름 변경
+     * =====================================================
+     */
+
+    fun updateWearerName(
+        name:
+        String,
+    ) {
+
+        launchRepositoryAction {
+
+            repository
+                .updateWearerName(
+                    name
                 )
         }
     }

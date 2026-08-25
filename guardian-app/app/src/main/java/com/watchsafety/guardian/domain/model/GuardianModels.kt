@@ -33,6 +33,8 @@ data class SafeZone(
     val radiusMeters: Int,
     val enabled: Boolean,
     val kind: SafeZoneKind,
+    val centerLatitude: Double = 0.0,
+    val centerLongitude: Double = 0.0,
 )
 
 enum class SafeZoneKind {

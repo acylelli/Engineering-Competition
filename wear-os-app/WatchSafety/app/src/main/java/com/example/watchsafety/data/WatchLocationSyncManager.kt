@@ -3,150 +3,81 @@ package com.example.watchsafety.data
 import android.location.Location
 import android.os.SystemClock
 import android.util.Log
-
 import com.example.watchsafety.location.WatchLocation
-
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
-
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-
 
 class WatchLocationSyncManager {
 
     private val supabase =
         SupabaseClientProvider.client
 
-
-    /*
-     * =====================================================
-     * 마지막으로 DB에 저장한 위치
-     * =====================================================
-     */
-
     private var lastSyncedLocation:
             WatchLocation? = null
 
-
-    /*
-     * 마지막 저장 시각
-     *
-     * System.currentTimeMillis() 대신
-     * elapsedRealtime 사용.
-     */
     private var lastSyncedAtMillis:
             Long? = null
 
-
-    /*
-     * =====================================================
-     * 위치 저장 기준
-     * =====================================================
-     */
-
     companion object {
-
-        /*
-         * 30m 이상 이동하면 저장
-         */
-        private const val MIN_DISTANCE_METERS =
-            30f
-
-
-        /*
-         * 이동하지 않아도
-         * 1분에 한 번 저장
-         */
-        private const val MAX_SYNC_INTERVAL_MILLIS =
-            60_000L
-
-
-        private const val TAG =
-            "WatchLocationSync"
+        private const val MIN_DISTANCE_METERS = 30f
+        private const val MAX_SYNC_INTERVAL_MILLIS = 60_000L
+        private const val RPC_TIMEOUT_MILLIS = 15_000L
+        private const val TAG = "WatchLocationSync"
     }
-
-
-    /*
-     * =====================================================
-     * 현재 위치를 서버에 저장할지 판단
-     * =====================================================
-     */
 
     suspend fun syncIfNeeded(
         currentLocation: WatchLocation
     ) {
-
-        /*
-         * 위도 / 경도 자체 검증
-         */
-        if (
-            currentLocation.latitude !in
-            -90.0..90.0
-        ) {
-            return
-        }
-
-
-        if (
-            currentLocation.longitude !in
-            -180.0..180.0
-        ) {
-            return
-        }
-
-
-        /*
-         * 저장할 필요가 없으면 종료
-         */
-        if (
-            !shouldSync(
-                currentLocation
-            )
-        ) {
-
-            return
-        }
-
-
-        /*
-         * Supabase 저장
-         */
-        sendLocation(
-            currentLocation
+        Log.d(
+            TAG,
+            "syncIfNeeded 호출 " +
+                    "lat=${currentLocation.latitude}, " +
+                    "lng=${currentLocation.longitude}, " +
+                    "accuracy=${currentLocation.accuracyMeters}"
         )
 
+        if (currentLocation.latitude !in -90.0..90.0) {
+            Log.w(
+                TAG,
+                "동기화 중단 - 잘못된 위도: ${currentLocation.latitude}"
+            )
+            return
+        }
 
-        /*
-         * 실제 RPC 성공 후에만
-         * 마지막 위치/시간 업데이트
-         */
+        if (currentLocation.longitude !in -180.0..180.0) {
+            Log.w(
+                TAG,
+                "동기화 중단 - 잘못된 경도: ${currentLocation.longitude}"
+            )
+            return
+        }
+
+        if (!shouldSync(currentLocation)) {
+            Log.d(
+                TAG,
+                "동기화 생략 - 30m 미만 이동 + 1분 미경과"
+            )
+            return
+        }
+
+        sendLocation(currentLocation)
+
         lastSyncedLocation =
             currentLocation
 
-
         lastSyncedAtMillis =
-            SystemClock
-                .elapsedRealtime()
-
+            SystemClock.elapsedRealtime()
 
         Log.d(
             TAG,
-            """
-            위치 동기화 성공
-            lat=${currentLocation.latitude}
-            lon=${currentLocation.longitude}
-            accuracy=${currentLocation.accuracyMeters}
-            """.trimIndent()
+            "위치 동기화 완료 " +
+                    "lat=${currentLocation.latitude}, " +
+                    "lng=${currentLocation.longitude}"
         )
     }
-
-
-    /*
-     * =====================================================
-     * 저장 여부 결정
-     * =====================================================
-     */
 
     private fun shouldSync(
         currentLocation: WatchLocation
@@ -155,31 +86,19 @@ class WatchLocationSyncManager {
         val previousLocation =
             lastSyncedLocation
 
-
         val previousTime =
             lastSyncedAtMillis
-
-
-        /*
-         * -------------------------------------------------
-         * 앱 실행 후 첫 위치
-         * -------------------------------------------------
-         */
 
         if (
             previousLocation == null ||
             previousTime == null
         ) {
-
+            Log.d(
+                TAG,
+                "저장 조건 충족 - 앱/서비스 시작 후 첫 위치"
+            )
             return true
         }
-
-
-        /*
-         * -------------------------------------------------
-         * 이전 저장 위치와 거리 계산
-         * -------------------------------------------------
-         */
 
         val distance =
             calculateDistanceMeters(
@@ -187,59 +106,35 @@ class WatchLocationSyncManager {
                 currentLocation
             )
 
-
-        /*
-         * -------------------------------------------------
-         * 마지막 저장 후 시간
-         * -------------------------------------------------
-         */
-
         val elapsedMillis =
-            SystemClock
-                .elapsedRealtime() -
+            SystemClock.elapsedRealtime() -
                     previousTime
 
+        Log.d(
+            TAG,
+            "저장 조건 검사 " +
+                    "distance=${"%.1f".format(distance)}m, " +
+                    "elapsed=${elapsedMillis}ms"
+        )
 
-        /*
-         * -------------------------------------------------
-         * 30m 이상 이동
-         * -------------------------------------------------
-         */
-
-        if (
-            distance >=
-            MIN_DISTANCE_METERS
-        ) {
-
+        if (distance >= MIN_DISTANCE_METERS) {
+            Log.d(
+                TAG,
+                "저장 조건 충족 - ${distance}m 이동"
+            )
             return true
         }
 
-
-        /*
-         * -------------------------------------------------
-         * 많이 이동하지 않았어도
-         * 1분 이상 지났으면 저장
-         * -------------------------------------------------
-         */
-
-        if (
-            elapsedMillis >=
-            MAX_SYNC_INTERVAL_MILLIS
-        ) {
-
+        if (elapsedMillis >= MAX_SYNC_INTERVAL_MILLIS) {
+            Log.d(
+                TAG,
+                "저장 조건 충족 - 1분 경과"
+            )
             return true
         }
-
 
         return false
     }
-
-
-    /*
-     * =====================================================
-     * 두 좌표 사이 거리 계산
-     * =====================================================
-     */
 
     private fun calculateDistanceMeters(
         previous: WatchLocation,
@@ -247,76 +142,72 @@ class WatchLocationSyncManager {
     ): Float {
 
         val results =
-            FloatArray(
-                1
-            )
-
+            FloatArray(1)
 
         Location.distanceBetween(
-
             previous.latitude,
             previous.longitude,
-
             current.latitude,
             current.longitude,
-
             results
         )
-
 
         return results[0]
     }
 
-
     /*
-     * =====================================================
-     * Supabase 전송
-     * =====================================================
+     * 중요:
+     * 이 계층에서는 더 이상 awaitInitialization()이나
+     * signInAnonymously()를 호출하지 않는다.
+     *
+     * WatchTrackingService가 PairingManager.getPairingInfo()로
+     * 현재 워치 Auth/페어링을 먼저 확인한 뒤에만
+     * syncIfNeeded()를 실행하므로 현재 세션만 사용한다.
      */
-
     private suspend fun sendLocation(
         location: WatchLocation
     ) {
 
-        /*
-         * -------------------------------------------------
-         * 익명 Auth 세션 확인
-         * -------------------------------------------------
-         */
+        Log.d(
+            TAG,
+            "sendLocation 진입"
+        )
 
-        if (
+        val currentUser =
             supabase
                 .auth
-                .currentUserOrNull() == null
-        ) {
+                .currentUserOrNull()
 
-            supabase
-                .auth
-                .signInAnonymously()
+        if (currentUser == null) {
+            Log.e(
+                TAG,
+                "위치 저장 실패 - 현재 Supabase Auth 세션 없음"
+            )
+
+            error(
+                "현재 워치 Supabase Auth 세션이 없습니다."
+            )
         }
 
+        val authUserId =
+            currentUser.id
 
-        /*
-         * -------------------------------------------------
-         * RPC 파라미터
-         * -------------------------------------------------
-         */
+        Log.d(
+            TAG,
+            "현재 워치 Auth 확인 uid=$authUserId"
+        )
 
         val parameters =
             JsonObject(
-
                 mapOf(
-
                     "p_latitude" to
                             JsonPrimitive(
                                 location.latitude
                             ),
-
                     "p_longitude" to
                             JsonPrimitive(
                                 location.longitude
                             ),
-
                     "p_accuracy_meters" to
                             JsonPrimitive(
                                 location
@@ -326,70 +217,59 @@ class WatchLocationSyncManager {
                 )
             )
 
+        Log.d(
+            TAG,
+            "record_watch_location RPC 시작 " +
+                    "uid=$authUserId, " +
+                    "lat=${location.latitude}, " +
+                    "lng=${location.longitude}"
+        )
 
-        /*
-         * -------------------------------------------------
-         * RPC 실행
-         * -------------------------------------------------
-         */
+        withTimeout(
+            RPC_TIMEOUT_MILLIS
+        ) {
+            supabase
+                .postgrest
+                .rpc(
+                    function =
+                        "record_watch_location",
+                    parameters =
+                        parameters
+                )
+        }
 
-        supabase
-            .postgrest
-            .rpc(
-
-                function =
-                    "record_watch_location",
-
-                parameters =
-                    parameters
-            )
+        Log.d(
+            TAG,
+            "record_watch_location RPC 응답 성공 uid=$authUserId"
+        )
     }
-
-
-    /*
-     * =====================================================
-     * 강제 위치 저장
-     * =====================================================
-     *
-     * 나중에:
-     *
-     * - SOS
-     * - 낙상
-     * - 안전구역 이탈
-     *
-     * 발생 시 거리/시간 조건과 상관없이 사용.
-     */
 
     suspend fun forceSync(
         location: WatchLocation
     ) {
 
+        Log.d(
+            TAG,
+            "forceSync 호출 " +
+                    "lat=${location.latitude}, " +
+                    "lng=${location.longitude}"
+        )
+
         sendLocation(
             location
         )
 
-
         lastSyncedLocation =
             location
 
-
         lastSyncedAtMillis =
-            SystemClock
-                .elapsedRealtime()
-
+            SystemClock.elapsedRealtime()
 
         Log.d(
             TAG,
             "위치 강제 동기화 완료"
         )
     }
-
-
-    /*
-     * =====================================================
-     * 상태 초기화
-     * =====================================================
-     */
 
     fun reset() {
 
@@ -398,5 +278,10 @@ class WatchLocationSyncManager {
 
         lastSyncedAtMillis =
             null
+
+        Log.d(
+            TAG,
+            "위치 동기화 상태 초기화"
+        )
     }
 }

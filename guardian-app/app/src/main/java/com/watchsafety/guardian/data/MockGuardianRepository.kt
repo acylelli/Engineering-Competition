@@ -31,10 +31,6 @@ class MockGuardianRepository : GuardianRepository {
             StateFlow<GuardianSnapshot> =
         _snapshot.asStateFlow()
 
-    /*
-     * 실제 Supabase Repository에서는 새로운 SOS를 전달한다.
-     * Mock에서는 발생시키지 않는다.
-     */
     override val newSosEvent:
             Flow<Unit> =
         emptyFlow()
@@ -93,7 +89,10 @@ class MockGuardianRepository : GuardianRepository {
             _snapshot.value.copy(
                 safeZones =
                     _snapshot.value.safeZones.map { zone ->
-                        if (zone.id == zoneId) {
+
+                        if (
+                            zone.id == zoneId
+                        ) {
                             zone.copy(
                                 enabled = enabled
                             )
@@ -105,33 +104,146 @@ class MockGuardianRepository : GuardianRepository {
     }
 
     override suspend fun addSafeZone(
+
         name: String,
+
         radiusMeters: Int,
-    ) {
+
+        latitude: Double,
+
+        longitude: Double,
+
+        isHome: Boolean,
+
+        ) {
 
         val current =
             _snapshot.value
 
+
         if (
             current.safeZones.size >= 5
         ) {
+
             return
         }
 
+
+        /*
+         * 새 안전구역을 HOME으로 지정하면
+         * 기존 HOME은 OTHER로 변경.
+         */
+        val normalizedExistingZones =
+
+            if (
+                isHome
+            ) {
+
+                current.safeZones
+                    .map { zone ->
+
+                        if (
+                            zone.kind ==
+                            SafeZoneKind.HOME
+                        ) {
+
+                            zone.copy(
+                                kind =
+                                    SafeZoneKind.OTHER
+                            )
+
+                        } else {
+
+                            zone
+                        }
+                    }
+
+            } else {
+
+                current.safeZones
+            }
+
+
         val newZone =
             SafeZone(
-                id = "zone-${current.safeZones.size + 1}",
-                name = name,
-                address = "지도에서 선택한 위치",
-                radiusMeters = radiusMeters,
-                enabled = true,
-                kind = SafeZoneKind.OTHER,
+
+                id =
+                    "zone-${current.safeZones.size + 1}",
+
+                name =
+                    name.trim(),
+
+                address =
+                    "지도에서 선택한 위치",
+
+                radiusMeters =
+                    radiusMeters,
+
+                enabled =
+                    true,
+
+                kind =
+                    if (
+                        isHome
+                    ) {
+
+                        SafeZoneKind.HOME
+
+                    } else {
+
+                        SafeZoneKind.OTHER
+                    },
+
+                centerLatitude =
+                    latitude,
+
+                centerLongitude =
+                    longitude,
             )
+
+
+        _snapshot.value =
+
+            current.copy(
+
+                safeZones =
+                    normalizedExistingZones +
+                            newZone
+            )
+    }
+
+    override suspend fun updateWearerName(
+        name: String,
+    ) {
+
+        val normalizedName =
+            name.trim()
+
+        require(
+            normalizedName.isNotBlank()
+        ) {
+            "착용자 이름을 입력해주세요."
+        }
+
+        require(
+            normalizedName.length <= 20
+        ) {
+            "착용자 이름은 20자 이하로 입력해주세요."
+        }
+
+        val current =
+            _snapshot.value
 
         _snapshot.value =
             current.copy(
-                safeZones =
-                    current.safeZones + newZone
+                user =
+                    current.user.copy(
+                        name = normalizedName
+                    ),
+                emergency =
+                    current.emergency.copy(
+                        userName = normalizedName
+                    ),
             )
     }
 
@@ -157,9 +269,9 @@ class MockGuardianRepository : GuardianRepository {
             user =
                 GuardianUser(
                     id = "user-1",
-                    name = "김순자",
-                    guardianName = "황현정",
-                    guardianRelationship = "딸",
+                    name = "워치 사용자",
+                    guardianName = "보호자",
+                    guardianRelationship = "",
                 ),
             watchStatus =
                 WatchStatus(
@@ -260,7 +372,7 @@ class MockGuardianRepository : GuardianRepository {
                 ),
             emergency =
                 EmergencyDetail(
-                    userName = "김순자",
+                    userName = "워치 사용자",
                     phoneNumber = "01012345678",
                     title = "낙상 감지 후 응답이 없어요",
                     description = "자동 SOS가 발송되었습니다",

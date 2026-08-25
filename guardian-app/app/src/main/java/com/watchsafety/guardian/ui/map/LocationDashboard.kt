@@ -34,10 +34,10 @@ import com.watchsafety.guardian.data.MockGuardianRepository
 import com.watchsafety.guardian.domain.model.GuardianUser
 import com.watchsafety.guardian.domain.model.LocationInfo
 import com.watchsafety.guardian.domain.model.ReturnHomeStatus
+import com.watchsafety.guardian.domain.model.SafeZone
 import com.watchsafety.guardian.domain.model.SafetyState
 import com.watchsafety.guardian.domain.model.WatchStatus
 import com.watchsafety.guardian.ui.components.GuardianTopBar
-import com.watchsafety.guardian.ui.components.MockMap
 import com.watchsafety.guardian.ui.components.StatusBadge
 import com.watchsafety.guardian.ui.theme.DividerColor
 import com.watchsafety.guardian.ui.theme.SafeGreen
@@ -49,6 +49,7 @@ fun CurrentLocationScreen(
     user: GuardianUser,
     watchStatus: WatchStatus,
     location: LocationInfo,
+    safeZones: List<SafeZone>,
     returnHomeRequested: Boolean,
     returnHomeStatus: ReturnHomeStatus,
     isRefreshing: Boolean,
@@ -69,9 +70,32 @@ fun CurrentLocationScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            MockMap(
-                modifier = Modifier.fillMaxSize(),
-                userLabel = "${user.name} 님",
+
+            /*
+             * =================================================
+             * 실제 TMAP 지도
+             * =================================================
+             *
+             * 보호자 휴대폰 GPS가 아니라
+             * Supabase locations에 저장된
+             * 워치 착용자 위치를 보여준다.
+             */
+
+            TmapMapView(
+                latitude =
+                    location.latitude,
+                longitude =
+                    location.longitude,
+                zoomLevel =
+                    16,
+                showLocationMarker =
+                    true,
+                followLocation =
+                    true,
+                safeZones =
+                    safeZones,
+                modifier =
+                    Modifier.fillMaxSize(),
             )
 
             LocationBottomSheet(
@@ -337,6 +361,7 @@ private fun CurrentLocationPreview() {
             user = preview.user,
             watchStatus = preview.watchStatus,
             location = preview.location,
+            safeZones = preview.safeZones,
             returnHomeRequested = preview.returnHomeRequested,
             returnHomeStatus = preview.returnHomeStatus,
             isRefreshing = false,
