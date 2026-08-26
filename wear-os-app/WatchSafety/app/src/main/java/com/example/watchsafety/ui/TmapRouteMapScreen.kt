@@ -10,10 +10,14 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -26,13 +30,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 import androidx.wear.compose.material.Icon
@@ -72,7 +81,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun TmapRouteMapScreen(
 
-    routeResult: TmapRouteResult,
+    routeResult: TmapRouteResult?,
 
     watchLocation: WatchLocation?,
 
@@ -98,18 +107,48 @@ fun TmapRouteMapScreen(
         LocalContext.current
 
 
-    var isMapReady by
+    var mapLoadState by
     remember {
 
         mutableStateOf(
-            false
+            TmapMapLoadState.INITIALIZING
         )
     }
 
 
+    var retryGeneration by
+    remember {
+
+        mutableStateOf(
+            0
+        )
+    }
+
+
+    var mapFailureDetail by
+    remember {
+
+        mutableStateOf<String?>(
+            null
+        )
+    }
+
+
+    val isMapReady =
+        mapLoadState ==
+            TmapMapLoadState.READY
+
+
+    val routePoints =
+        routeResult
+            ?.routePoints
+            .orEmpty()
+
+
     var initialRouteShown by
     remember(
-        routeResult
+        routeResult,
+        retryGeneration
     ) {
 
         mutableStateOf(
@@ -125,23 +164,62 @@ fun TmapRouteMapScreen(
      *
      * 공식 TMAP Compose 관련 사례처럼:
      *
-     * 1. API Key 설정
-     * 2. MapReadyListener 설정
-     * 3. AndroidView에 전달
+     * 1. 모든 리스너를 먼저 설정
+     * 2. AndroidView가 실제 Window에 붙은 뒤 API Key 설정
+     * 3. SDK 자체 attach/detach lifecycle에 맡긴다.
      */
     val tMapView =
         remember(
-            context
+            context,
+            retryGeneration
         ) {
 
             TMapView(
                 context
-            )
+                )
                 .apply {
 
-                    setSKTMapApiKey(
-                        BuildConfig.TMAP_APP_KEY
+                    setOnApiKeyListenerCallback(
+
+                        object : TMapView.OnApiKeyListenerCallback {
+
+                            override fun onSKTMapApikeySucceed() {
+
+                                Log.d(
+                                    TAG,
+                                    "TMAP API Key 인증 성공"
+                                )
+                            }
+
+
+                            override fun onSKTMapApikeyFailed(
+                                errorMessage: String?
+                            ) {
+
+                                Log.e(
+                                    TAG,
+                                    "TMAP API Key 인증 실패: $errorMessage"
+                                )
+
+
+                                mapFailureDetail =
+                                    errorMessage
+
+
+                                mapLoadState =
+                                    TmapMapLoadState.API_KEY_FAILED
+                            }
+                        }
                     )
+
+
+                    setOnConfigLoadedListener {
+
+                        Log.d(
+                            TAG,
+                            "TMAP VectorMap 설정 로드 완료"
+                        )
+                    }
 
 
                     setOnMapReadyListener {
@@ -152,8 +230,12 @@ fun TmapRouteMapScreen(
                         )
 
 
-                        isMapReady =
-                            true
+                        mapFailureDetail =
+                            null
+
+
+                        mapLoadState =
+                            TmapMapLoadState.READY
                     }
 
 
@@ -200,38 +282,18 @@ fun TmapRouteMapScreen(
      * TMapView Lifecycle
      * =====================================================
      *
-     * VectorMap 공식 API:
-     * onResume()
-     * onPause()
-     * onDestroy()
+     * TMapView는 attach/detach 시 내부에서 onResume/onPause를 호출한다.
+     * Compose에서 수동으로 중복 호출하지 않고, 화면 폐기 시 onDestroy만
+     * 정확히 한 번 호출한다.
      */
     DisposableEffect(
         tMapView
     ) {
 
-        tMapView.onResume()
-
-
         onDispose {
 
-            isMapReady =
-                false
-
-
-            try {
-
-                tMapView.onPause()
-
-            } catch (
-                error: Throwable
-            ) {
-
-                Log.w(
-                    TAG,
-                    "TMapView onPause 실패",
-                    error
-                )
-            }
+            mapLoadState =
+                TmapMapLoadState.INITIALIZING
 
 
             try {
@@ -248,6 +310,42 @@ fun TmapRouteMapScreen(
                     error
                 )
             }
+        }
+    }
+
+
+    LaunchedEffect(
+        retryGeneration,
+        mapLoadState
+    ) {
+
+        if (
+            mapLoadState !=
+            TmapMapLoadState.INITIALIZING
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        delay(
+            MAP_READY_TIMEOUT_MILLIS
+        )
+
+
+        if (
+            mapLoadState ==
+            TmapMapLoadState.INITIALIZING
+        ) {
+
+            Log.e(
+                TAG,
+                "TMAP VectorMap 준비 시간 초과"
+            )
+
+
+            mapLoadState =
+                TmapMapLoadState.TIMED_OUT
         }
     }
 
@@ -270,7 +368,7 @@ fun TmapRouteMapScreen(
      */
     DisposableEffect(
         isMapReady,
-        routeResult.routePoints,
+        routePoints,
         tMapView
     ) {
 
@@ -283,8 +381,7 @@ fun TmapRouteMapScreen(
         } else {
 
             val validRoutePoints =
-                routeResult
-                    .routePoints
+                routePoints
                     .filter { point ->
 
                         isValidCoordinate(
@@ -547,7 +644,7 @@ fun TmapRouteMapScreen(
      */
     LaunchedEffect(
         isMapReady,
-        routeResult.routePoints,
+        routePoints,
         tMapView
     ) {
 
@@ -561,8 +658,7 @@ fun TmapRouteMapScreen(
 
 
         val validRoutePoints =
-            routeResult
-                .routePoints
+            routePoints
                 .filter { point ->
 
                     isValidCoordinate(
@@ -758,16 +854,135 @@ fun TmapRouteMapScreen(
                 )
     ) {
 
-        AndroidView(
+        key(
+            retryGeneration
+        ) {
 
-            factory = {
+            AndroidView(
 
-                tMapView
-            },
+                factory = {
 
-            modifier =
-                Modifier.fillMaxSize()
-        )
+                    tMapView
+                        .also { mapView ->
+
+                            /*
+                             * View.post는 AndroidView가 Window에 attach된 뒤
+                             * 실행된다. 리스너가 모두 등록된 상태에서 인증과
+                             * 엔진 초기화를 시작해 초기 MapReady 누락을 막는다.
+                             */
+                            mapView.post {
+
+                                val apiKey =
+                                    BuildConfig.TMAP_APP_KEY
+
+
+                                if (
+                                    apiKey.isBlank()
+                                ) {
+
+                                    Log.e(
+                                        TAG,
+                                        "TMAP_APP_KEY가 비어 있음"
+                                    )
+
+
+                                    mapFailureDetail =
+                                        "앱 키가 설정되지 않았습니다."
+
+
+                                    mapLoadState =
+                                        TmapMapLoadState.API_KEY_FAILED
+
+                                } else {
+
+                                    Log.d(
+                                        TAG,
+                                        "TMAP 초기화 시작 keyPresent=true keyLength=${apiKey.length}"
+                                    )
+
+
+                                    mapView.setSKTMapApiKey(
+                                        apiKey
+                                    )
+                                }
+                            }
+                        }
+                },
+
+                modifier =
+                    Modifier.fillMaxSize()
+            )
+        }
+
+
+        if (
+            mapLoadState !=
+            TmapMapLoadState.READY
+        ) {
+
+            TmapMapLoadingOverlay(
+                state =
+                    mapLoadState,
+
+                failureDetail =
+                    mapFailureDetail,
+
+                onRetry = {
+
+                    mapFailureDetail =
+                        null
+
+
+                    mapLoadState =
+                        TmapMapLoadState.INITIALIZING
+
+
+                    retryGeneration +=
+                        1
+                }
+            )
+
+        } else if (
+            routeResult == null
+        ) {
+
+            BasicText(
+                text =
+                    "경로 계산 중...",
+
+                modifier =
+                    Modifier
+                        .align(
+                            Alignment.TopCenter
+                        )
+                        .padding(
+                            top =
+                                12.dp
+                        )
+                        .background(
+                            Color(
+                                0xCC111111
+                            ),
+                            CircleShape
+                        )
+                        .padding(
+                            horizontal =
+                                12.dp,
+                            vertical =
+                                6.dp
+                        ),
+
+                style =
+                    TextStyle(
+                        color =
+                            Color.White,
+                        fontSize =
+                            11.sp,
+                        textAlign =
+                            TextAlign.Center
+                    )
+            )
+        }
 
 
         /*
@@ -918,6 +1133,175 @@ private fun moveToCurrentLocation(
                 "lat=${watchLocation.latitude} " +
                 "lng=${watchLocation.longitude}"
     )
+}
+
+
+private enum class TmapMapLoadState {
+
+    INITIALIZING,
+
+    READY,
+
+    API_KEY_FAILED,
+
+    TIMED_OUT
+}
+
+
+@Composable
+private fun TmapMapLoadingOverlay(
+
+    state: TmapMapLoadState,
+
+    failureDetail: String?,
+
+    onRetry: () -> Unit
+
+) {
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xCC000000
+                    )
+                ),
+        contentAlignment =
+            Alignment.Center
+    ) {
+
+        Column(
+            horizontalAlignment =
+                Alignment.CenterHorizontally
+        ) {
+
+            BasicText(
+                text =
+                    when (
+                        state
+                    ) {
+
+                        TmapMapLoadState.INITIALIZING ->
+                            "지도 불러오는 중..."
+
+                        TmapMapLoadState.API_KEY_FAILED ->
+                            "지도 인증 실패"
+
+                        TmapMapLoadState.TIMED_OUT ->
+                            "지도 연결 실패"
+
+                        TmapMapLoadState.READY ->
+                            ""
+                    },
+                style =
+                    TextStyle(
+                        color =
+                            Color.White,
+                        fontSize =
+                            13.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                        textAlign =
+                            TextAlign.Center
+                    )
+            )
+
+
+            if (
+                state ==
+                TmapMapLoadState.API_KEY_FAILED &&
+                !failureDetail.isNullOrBlank()
+            ) {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            4.dp
+                        )
+                )
+
+
+                BasicText(
+                    text =
+                        failureDetail.take(
+                            60
+                        ),
+                    style =
+                        TextStyle(
+                            color =
+                                Color(
+                                    0xFFFFB4AB
+                                ),
+                            fontSize =
+                                9.sp,
+                            textAlign =
+                                TextAlign.Center
+                        )
+                )
+            }
+
+
+            if (
+                state ==
+                TmapMapLoadState.API_KEY_FAILED ||
+                state ==
+                TmapMapLoadState.TIMED_OUT
+            ) {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            8.dp
+                        )
+                )
+
+
+                Box(
+                    modifier =
+                        Modifier
+                            .clip(
+                                CircleShape
+                            )
+                            .background(
+                                Color(
+                                    0xFF2F5FE3
+                                )
+                            )
+                            .clickable(
+                                onClick =
+                                    onRetry
+                            )
+                            .padding(
+                                horizontal =
+                                    14.dp,
+                                vertical =
+                                    7.dp
+                            ),
+                    contentAlignment =
+                        Alignment.Center
+                ) {
+
+                    BasicText(
+                        text =
+                            "다시 시도",
+                        style =
+                            TextStyle(
+                                color =
+                                    Color.White,
+                                fontSize =
+                                    11.sp,
+                                fontWeight =
+                                    FontWeight.Bold,
+                                textAlign =
+                                    TextAlign.Center
+                            )
+                    )
+                }
+            }
+        }
+    }
 }
 
 
@@ -1161,6 +1545,10 @@ private const val FOLLOW_ZOOM_LEVEL =
  */
 private const val WHOLE_ROUTE_HOLD_MILLIS =
     1_700L
+
+
+private const val MAP_READY_TIMEOUT_MILLIS =
+    10_000L
 
 
 private const val ROUTE_LINE_ID =
