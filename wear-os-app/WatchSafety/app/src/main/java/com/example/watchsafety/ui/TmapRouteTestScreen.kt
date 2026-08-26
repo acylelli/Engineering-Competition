@@ -1,22 +1,30 @@
 package com.example.watchsafety.ui
 
+import android.hardware.GeomagneticField
+import android.location.Location
 import android.util.Log
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Map
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,8 +32,10 @@ import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,8 +46,13 @@ import androidx.wear.compose.material.Icon
 
 import com.example.watchsafety.data.ReturnHomeRealtimeManager
 import com.example.watchsafety.location.WatchLocation
+import com.example.watchsafety.navigation.NavigationStep
+import com.example.watchsafety.navigation.NavigationVoiceManager
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
+import com.example.watchsafety.navigation.WatchHeadingManager
+
+import kotlinx.coroutines.delay
 
 
 @Composable
@@ -57,22 +72,91 @@ fun TmapRouteTestScreen(
 
     homeRadiusMeters: Double?,
 
-    /*
-     * MainActivity의 WatchLocationManager가 이미 받고 있는
-     * 실제 GPS 위치를 그대로 사용한다.
-     *
-     * 화면 내부에서 별도의 WatchLocationManager를 만들지 않는다.
-     */
     watchLocation: WatchLocation?,
 
     onReturnHomeCompleted: (String) -> Unit,
 ) {
 
+    val context =
+        LocalContext.current
+
+
     val routeClient =
         remember {
-
             TmapRouteClient()
         }
+
+
+    /*
+     * =====================================================
+     * 워치 방향 센서
+     * =====================================================
+     */
+    val headingManager =
+        remember {
+
+            WatchHeadingManager(
+                context
+            )
+        }
+
+
+    val headingDegrees by
+    headingManager
+        .headingDegrees
+        .collectAsState()
+
+
+    DisposableEffect(
+        headingManager
+    ) {
+
+        val started =
+            headingManager.start()
+
+
+        Log.d(
+            HEADING_TAG,
+            "heading manager start=$started"
+        )
+
+
+        onDispose {
+
+            headingManager.stop()
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 음성 안내
+     * =====================================================
+     */
+    val voiceManager =
+        remember {
+
+            NavigationVoiceManager(
+                context
+            )
+        }
+
+
+    val voiceReady by
+    voiceManager
+        .isReady
+        .collectAsState()
+
+
+    DisposableEffect(
+        voiceManager
+    ) {
+
+        onDispose {
+
+            voiceManager.shutdown()
+        }
+    }
 
 
     var routeResult by
@@ -84,10 +168,6 @@ fun TmapRouteTestScreen(
     }
 
 
-    /*
-     * 한 화면 진입 동안 같은 경로를
-     * 반복해서 요청하지 않기 위한 상태.
-     */
     var routeRequested by
     remember {
 
@@ -97,9 +177,6 @@ fun TmapRouteTestScreen(
     }
 
 
-    /*
-     * ACCEPTED → NAVIGATING 반영 여부
-     */
     var navigatingUpdated by
     remember {
 
@@ -109,10 +186,6 @@ fun TmapRouteTestScreen(
     }
 
 
-    /*
-     * HOME 반경 진입 후
-     * COMPLETED 중복 전송 방지.
-     */
     var completedUpdated by
     remember {
 
@@ -132,8 +205,65 @@ fun TmapRouteTestScreen(
 
 
     /*
+     * 현재 보여주고 있는 TMAP 안내 Point.
+     */
+    var currentGuidePosition by
+    remember {
+
+        mutableStateOf(
+            0
+        )
+    }
+
+
+    /*
+     * 귀가 안내 시작 음성을 한 번만 말하기 위한 상태.
+     */
+    var voiceStarted by
+    remember(
+        returnHomeRequestId
+    ) {
+
+        mutableStateOf(
+            false
+        )
+    }
+
+
+    /*
+     * 다음에 말할 100m 단위 거리.
+     *
+     * 예:
+     * 500 → 400 → 300 → 200 → 100
+     */
+    var nextVoiceThresholdMeters by
+    remember(
+        returnHomeRequestId
+    ) {
+
+        mutableStateOf<Int?>(
+            null
+        )
+    }
+
+
+    /*
      * =====================================================
-     * 화면 진입 상태 로그
+     * 지도 보기 상태
+     * =====================================================
+     */
+    var showMap by
+    remember {
+
+        mutableStateOf(
+            false
+        )
+    }
+
+
+    /*
+     * =====================================================
+     * 화면 상태 로그
      * =====================================================
      */
     LaunchedEffect(
@@ -166,7 +296,7 @@ fun TmapRouteTestScreen(
 
     /*
      * =====================================================
-     * GPS 상태 로그
+     * GPS 상태
      * =====================================================
      */
     LaunchedEffect(
@@ -183,14 +313,14 @@ fun TmapRouteTestScreen(
 
             Log.d(
                 TAG,
-                "MainActivity GPS 아직 없음"
+                "GPS 아직 없음"
             )
 
         } else {
 
             Log.d(
                 TAG,
-                "MainActivity GPS 수신 " +
+                "GPS 수신 " +
                         "lat=${watchLocation.latitude} " +
                         "lng=${watchLocation.longitude}"
             )
@@ -200,12 +330,7 @@ fun TmapRouteTestScreen(
 
     /*
      * =====================================================
-     * 집까지 경로 검색
-     *
-     * MainActivity가 이미 받고 있는 watchLocation을 사용한다.
-     *
-     * 경로 검색 성공 후:
-     * ACCEPTED → NAVIGATING
+     * TMAP 집까지 보행자 경로 검색
      * =====================================================
      */
     LaunchedEffect(
@@ -225,13 +350,6 @@ fun TmapRouteTestScreen(
 
             statusText =
                 "현재 위치를 찾고 있습니다..."
-
-
-            Log.d(
-                TAG,
-                "경로 검색 대기: GPS 위치 없음"
-            )
-
 
             return@LaunchedEffect
         }
@@ -256,8 +374,7 @@ fun TmapRouteTestScreen(
 
             Log.e(
                 TAG,
-                "경로 검색 중단: HOME 좌표 없음 " +
-                        "lat=$homeLatitude lng=$homeLongitude"
+                "HOME 좌표 없음"
             )
 
 
@@ -279,16 +396,6 @@ fun TmapRouteTestScreen(
 
         statusText =
             "집까지 경로 검색 중..."
-
-
-        Log.d(
-            TAG,
-            "TMAP 경로 검색 시작 " +
-                    "startLat=${location.latitude} " +
-                    "startLng=${location.longitude} " +
-                    "endLat=$destinationLatitude " +
-                    "endLng=$destinationLongitude"
-        )
 
 
         try {
@@ -315,6 +422,31 @@ fun TmapRouteTestScreen(
                 result
 
 
+            /*
+             * TMAP 출발점 turnType=200은 실제 회전 안내가 아니므로
+             * 첫 실제 안내점으로 이동한다.
+             */
+            currentGuidePosition =
+
+                result
+                    .steps
+                    .indexOfFirst {
+
+                        it.turnType !=
+                                TMAP_START_POINT
+                    }
+                    .let {
+
+                        if (
+                            it >= 0
+                        ) {
+                            it
+                        } else {
+                            0
+                        }
+                    }
+
+
             statusText =
                 "경로 검색 완료"
 
@@ -323,10 +455,15 @@ fun TmapRouteTestScreen(
                 TAG,
                 "TMAP 경로 검색 성공 " +
                         "distance=${result.totalDistanceMeters}m " +
-                        "time=${result.totalTimeSeconds}s"
+                        "time=${result.totalTimeSeconds}s " +
+                        "steps=${result.steps.size}"
             )
 
 
+            /*
+             * 보호자의 귀가 요청으로 시작된 경우
+             * ACCEPTED → NAVIGATING
+             */
             val requestId =
                 returnHomeRequestId
 
@@ -339,25 +476,12 @@ fun TmapRouteTestScreen(
                 wearerId
 
 
-            /*
-             * 보호자가 보낸 귀가 요청으로 시작된 경우에만
-             * DB 상태를 NAVIGATING으로 변경한다.
-             *
-             * 워치 홈 화면에서 직접 집으로 가기를 누른 경우에는
-             * requestId가 null이므로 길안내만 사용한다.
-             */
             if (
                 requestId != null &&
                 currentGuardianId != null &&
                 currentWearerId != null &&
                 !navigatingUpdated
             ) {
-
-                Log.d(
-                    RETURN_HOME_TAG,
-                    "NAVIGATING 변경 요청: $requestId"
-                )
-
 
                 try {
 
@@ -390,7 +514,7 @@ fun TmapRouteTestScreen(
 
                     Log.e(
                         RETURN_HOME_TAG,
-                        "NAVIGATING 변경 실패: ${error.message}",
+                        "NAVIGATING 변경 실패",
                         error
                     )
 
@@ -398,16 +522,6 @@ fun TmapRouteTestScreen(
                     statusText =
                         "길안내 상태 저장 실패"
                 }
-
-            } else {
-
-                Log.d(
-                    RETURN_HOME_TAG,
-                    "NAVIGATING 변경 생략 " +
-                            "requestId=$requestId " +
-                            "guardianId=$currentGuardianId " +
-                            "wearerId=$currentWearerId"
-                )
             }
 
         } catch (
@@ -416,14 +530,11 @@ fun TmapRouteTestScreen(
 
             Log.e(
                 TAG,
-                "TMAP 경로 검색 실패: ${error.message}",
+                "TMAP 경로 검색 실패",
                 error
             )
 
 
-            /*
-             * 다음 GPS 업데이트에서 재시도할 수 있도록 한다.
-             */
             routeRequested =
                 false
 
@@ -440,12 +551,455 @@ fun TmapRouteTestScreen(
 
     /*
      * =====================================================
+     * 귀가 시작 음성
+     *
+     * 시작할 때 현재 GPS→집 거리를 약 100m 단위로 알려준다.
+     *
+     * 예:
+     * 563m → "집까지 약 600미터입니다."
+     * =====================================================
+     */
+    LaunchedEffect(
+        routeResult,
+        voiceReady,
+        watchLocation,
+        homeLatitude,
+        homeLongitude,
+        completedUpdated
+    ) {
+
+        if (
+            !voiceReady ||
+            voiceStarted ||
+            completedUpdated
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        routeResult
+            ?: return@LaunchedEffect
+
+
+        val current =
+            watchLocation
+                ?: return@LaunchedEffect
+
+
+        val destinationLatitude =
+            homeLatitude
+                ?: return@LaunchedEffect
+
+
+        val destinationLongitude =
+            homeLongitude
+                ?: return@LaunchedEffect
+
+
+        val remainingMeters =
+            distanceBetweenMeters(
+
+                startLatitude =
+                    current.latitude,
+
+                startLongitude =
+                    current.longitude,
+
+                endLatitude =
+                    destinationLatitude,
+
+                endLongitude =
+                    destinationLongitude
+            )
+                .toInt()
+
+
+        val roundedDistance =
+            nearestHundred(
+                remainingMeters
+            )
+
+
+        voiceManager.speak(
+
+            "집으로 안내를 시작합니다. " +
+                    "집까지 약 ${roundedDistance}미터입니다."
+        )
+
+
+        voiceStarted =
+            true
+
+
+        /*
+         * 시작 안내 다음에 말할 100m 경계.
+         *
+         * 실제 현재 거리를 기준으로 잡아
+         * 첫 안내와 중복되지 않도록 한다.
+         */
+        nextVoiceThresholdMeters =
+            nextLowerHundred(
+                remainingMeters
+            )
+
+
+        Log.d(
+            VOICE_TAG,
+            "귀가 시작 음성 " +
+                    "remaining=$remainingMeters " +
+                    "rounded=$roundedDistance " +
+                    "next=$nextVoiceThresholdMeters"
+        )
+    }
+
+
+    /*
+     * =====================================================
+     * 100m 단위 음성 안내
+     *
+     * 각 거리 구간은 한 번만 말한다.
+     *
+     * 예:
+     * 500m → 400m → 300m → 200m → 100m
+     *
+     * GPS가 크게 건너뛰면
+     * 지나간 숫자를 뒤늦게 읽지 않고 현재 위치에 맞춘
+     * 가장 가까운 100m 단위를 말한다.
+     * =====================================================
+     */
+    LaunchedEffect(
+        watchLocation,
+        voiceReady,
+        voiceStarted,
+        nextVoiceThresholdMeters,
+        homeLatitude,
+        homeLongitude,
+        completedUpdated
+    ) {
+
+        if (
+            !voiceReady ||
+            !voiceStarted ||
+            completedUpdated
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        val threshold =
+            nextVoiceThresholdMeters
+                ?: return@LaunchedEffect
+
+
+        val current =
+            watchLocation
+                ?: return@LaunchedEffect
+
+
+        val destinationLatitude =
+            homeLatitude
+                ?: return@LaunchedEffect
+
+
+        val destinationLongitude =
+            homeLongitude
+                ?: return@LaunchedEffect
+
+
+        val remainingMeters =
+            distanceBetweenMeters(
+
+                startLatitude =
+                    current.latitude,
+
+                startLongitude =
+                    current.longitude,
+
+                endLatitude =
+                    destinationLatitude,
+
+                endLongitude =
+                    destinationLongitude
+            )
+                .toInt()
+
+
+        if (
+            remainingMeters >
+            threshold
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        val currentHundred =
+            ceilHundred(
+                remainingMeters
+            )
+
+
+        val announceDistance =
+            minOf(
+                threshold,
+                currentHundred
+            )
+
+
+        if (
+            announceDistance <
+            100
+        ) {
+
+            nextVoiceThresholdMeters =
+                null
+
+            return@LaunchedEffect
+        }
+
+
+        voiceManager.speak(
+            "집까지 약 ${announceDistance}미터 남았습니다."
+        )
+
+
+        Log.d(
+            VOICE_TAG,
+            "100m 음성 안내 " +
+                    "remaining=$remainingMeters " +
+                    "announce=$announceDistance"
+        )
+
+
+        nextVoiceThresholdMeters =
+            (
+                    announceDistance -
+                            100
+                    )
+                .takeIf {
+
+                    it >=
+                            100
+                }
+    }
+
+
+    /*
+     * =====================================================
+     * GPS 위치에 따라 현재 안내 Step 변경
+     * =====================================================
+     */
+    LaunchedEffect(
+        watchLocation,
+        routeResult,
+        completedUpdated
+    ) {
+
+        if (
+            completedUpdated
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        val current =
+            watchLocation
+                ?: return@LaunchedEffect
+
+
+        val route =
+            routeResult
+                ?: return@LaunchedEffect
+
+
+        if (
+            route.steps.isEmpty()
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        var position =
+            currentGuidePosition
+                .coerceIn(
+                    0,
+                    route.steps.lastIndex
+                )
+
+
+        while (
+            position <
+            route.steps.lastIndex &&
+            route.steps[position].turnType ==
+            TMAP_START_POINT
+        ) {
+
+            position++
+        }
+
+
+        val searchEndPosition =
+            (
+                    position +
+                            GUIDE_LOOK_AHEAD_COUNT
+                    )
+                .coerceAtMost(
+                    route.steps.lastIndex
+                )
+
+
+        var nearestPosition =
+            position
+
+
+        var nearestDistance =
+            Double.MAX_VALUE
+
+
+        for (
+        index in
+        position..searchEndPosition
+        ) {
+
+            val step =
+                route.steps[index]
+
+
+            if (
+                step.turnType ==
+                TMAP_START_POINT
+            ) {
+
+                continue
+            }
+
+
+            val distance =
+                distanceBetweenMeters(
+
+                    startLatitude =
+                        current.latitude,
+
+                    startLongitude =
+                        current.longitude,
+
+                    endLatitude =
+                        step.latitude,
+
+                    endLongitude =
+                        step.longitude
+                )
+
+
+            if (
+                distance <
+                nearestDistance
+            ) {
+
+                nearestDistance =
+                    distance
+
+
+                nearestPosition =
+                    index
+            }
+        }
+
+
+        if (
+            nearestPosition >
+            position &&
+            nearestDistance <=
+            GUIDE_SNAP_DISTANCE_METERS
+        ) {
+
+            position =
+                nearestPosition
+        }
+
+
+        val currentStep =
+            route.steps[position]
+
+
+        val currentStepDistance =
+            distanceBetweenMeters(
+
+                startLatitude =
+                    current.latitude,
+
+                startLongitude =
+                    current.longitude,
+
+                endLatitude =
+                    currentStep.latitude,
+
+                endLongitude =
+                    currentStep.longitude
+            )
+
+
+        Log.d(
+            NAVIGATION_TAG,
+            "현재안내 position=$position " +
+                    "turnType=${currentStep.turnType} " +
+                    "distance=${currentStepDistance.toInt()}m " +
+                    "description=${currentStep.description}"
+        )
+
+
+        if (
+            currentStepDistance <=
+            GUIDE_REACHED_DISTANCE_METERS
+        ) {
+
+            val nextPosition =
+                findNextGuidePosition(
+
+                    steps =
+                        route.steps,
+
+                    currentPosition =
+                        position
+                )
+
+
+            if (
+                nextPosition !=
+                position
+            ) {
+
+                Log.d(
+                    NAVIGATION_TAG,
+                    "다음 안내로 변경 " +
+                            "$position → $nextPosition"
+                )
+
+
+                position =
+                    nextPosition
+            }
+        }
+
+
+        if (
+            currentGuidePosition !=
+            position
+        ) {
+
+            currentGuidePosition =
+                position
+        }
+    }
+
+
+    /*
+     * =====================================================
      * HOME 안전구역 도착 감지
-     *
-     * NAVIGATING이 된 이후
-     * 현재 GPS가 HOME 중심 반경 안으로 들어오면:
-     *
-     * NAVIGATING → COMPLETED
      * =====================================================
      */
     LaunchedEffect(
@@ -457,14 +1011,12 @@ fun TmapRouteTestScreen(
         completedUpdated
     ) {
 
-        if (
-            !navigatingUpdated
-        ) {
-
-            return@LaunchedEffect
-        }
-
-
+        /*
+         * 보호자 요청 없이 워치에서 직접 귀가 안내를 시작한 경우도
+         * 화면상의 도착 처리는 가능하게 한다.
+         *
+         * DB COMPLETED 처리는 request 정보가 있을 때만 수행한다.
+         */
         if (
             completedUpdated
         ) {
@@ -497,38 +1049,25 @@ fun TmapRouteTestScreen(
             radiusMeters <= 0.0
         ) {
 
-            Log.e(
-                RETURN_HOME_TAG,
-                "HOME 반경 값 오류: $radiusMeters"
-            )
-
-
             return@LaunchedEffect
         }
 
 
-        val distanceResult =
-            FloatArray(
-                1
-            )
-
-
-        android.location.Location
-            .distanceBetween(
-
-                location.latitude,
-                location.longitude,
-
-                destinationLatitude,
-                destinationLongitude,
-
-                distanceResult
-            )
-
-
         val distanceMeters =
-            distanceResult[0]
-                .toDouble()
+            distanceBetweenMeters(
+
+                startLatitude =
+                    location.latitude,
+
+                startLongitude =
+                    location.longitude,
+
+                endLatitude =
+                    destinationLatitude,
+
+                endLongitude =
+                    destinationLongitude
+            )
 
 
         Log.d(
@@ -538,9 +1077,6 @@ fun TmapRouteTestScreen(
         )
 
 
-        /*
-         * 아직 HOME 안전구역 밖
-         */
         if (
             distanceMeters >
             radiusMeters
@@ -548,6 +1084,25 @@ fun TmapRouteTestScreen(
 
             return@LaunchedEffect
         }
+
+
+        completedUpdated =
+            true
+
+
+        statusText =
+            "집에 도착했습니다."
+
+
+        /*
+         * 도착 음성을 먼저 들려준다.
+         *
+         * 바로 HOME 화면으로 이동하면 TTS manager가 dispose 되면서
+         * 음성이 잘릴 수 있어 짧게 유지한다.
+         */
+        voiceManager.speak(
+            "집에 도착했습니다. 안전하게 귀가했습니다."
+        )
 
 
         val requestId =
@@ -563,92 +1118,120 @@ fun TmapRouteTestScreen(
 
 
         if (
-            requestId == null ||
-            currentGuardianId == null ||
-            currentWearerId == null
+            requestId != null &&
+            currentGuardianId != null &&
+            currentWearerId != null
         ) {
 
-            Log.e(
-                RETURN_HOME_TAG,
-                "COMPLETED 처리 정보 부족 " +
-                        "requestId=$requestId " +
-                        "guardianId=$currentGuardianId " +
-                        "wearerId=$currentWearerId"
-            )
+            try {
+
+                returnHomeRealtimeManager
+                    .completeRequest(
+
+                        requestId =
+                            requestId,
+
+                        guardianId =
+                            currentGuardianId,
+
+                        wearerId =
+                            currentWearerId
+                    )
 
 
-            return@LaunchedEffect
-        }
-
-
-        /*
-         * GPS가 연속으로 들어오는 동안
-         * 같은 COMPLETED RPC를 동시에 여러 번 호출하지 않는다.
-         */
-        completedUpdated =
-            true
-
-
-        statusText =
-            "집에 도착했습니다."
-
-
-        Log.d(
-            RETURN_HOME_TAG,
-            "HOME 반경 진입 → COMPLETED 변경 요청: $requestId"
-        )
-
-
-        try {
-
-            returnHomeRealtimeManager
-                .completeRequest(
-
-                    requestId =
-                        requestId,
-
-                    guardianId =
-                        currentGuardianId,
-
-                    wearerId =
-                        currentWearerId
+                Log.d(
+                    RETURN_HOME_TAG,
+                    "HOME 도착 → COMPLETED 성공: $requestId"
                 )
 
 
-            Log.d(
-                RETURN_HOME_TAG,
-                "HOME 도착 → COMPLETED 성공: $requestId"
-            )
+                /*
+                 * 짧은 도착 문장이 끝날 시간을 확보.
+                 */
+                delay(
+                    ARRIVAL_VOICE_HOLD_MILLIS
+                )
 
 
-            onReturnHomeCompleted(
-                requestId
-            )
+                onReturnHomeCompleted(
+                    requestId
+                )
 
-        } catch (
-            error: Exception
-        ) {
+            } catch (
+                error: Exception
+            ) {
 
-            completedUpdated =
-                false
-
-
-            Log.e(
-                RETURN_HOME_TAG,
-                "COMPLETED 변경 실패: ${error.message}",
-                error
-            )
+                completedUpdated =
+                    false
 
 
-            statusText =
-                "귀가 완료 상태 저장 실패"
+                Log.e(
+                    RETURN_HOME_TAG,
+                    "COMPLETED 변경 실패",
+                    error
+                )
+
+
+                statusText =
+                    "귀가 완료 상태 저장 실패"
+            }
         }
     }
 
 
     /*
      * =====================================================
-     * UI
+     * TMAP 지도 모드
+     * =====================================================
+     *
+     * 음성/센서/귀가 상태 로직은 이 Composable에 그대로 살아 있고
+     * 화면만 지도 전체화면으로 전환한다.
+     */
+    if (
+        showMap
+    ) {
+
+        val route =
+            routeResult
+
+
+        if (
+            route != null
+        ) {
+
+            TmapRouteMapScreen(
+
+                routeResult =
+                    route,
+
+                watchLocation =
+                    watchLocation,
+
+                homeLatitude =
+                    homeLatitude,
+
+                homeLongitude =
+                    homeLongitude,
+
+                headingDegrees =
+                    headingDegrees,
+
+                onClose = {
+
+                    showMap =
+                        false
+                }
+            )
+
+
+            return
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 기본 큰 화살표 화면
      * =====================================================
      */
     Column(
@@ -704,9 +1287,7 @@ fun TmapRouteTestScreen(
 
         } else {
 
-
             val realTimeDistance =
-
                 watchLocation
                     ?.let { current ->
 
@@ -715,33 +1296,26 @@ fun TmapRouteTestScreen(
                             homeLongitude != null
                         ) {
 
-                            val results =
-                                FloatArray(
-                                    1
-                                )
+                            distanceBetweenMeters(
 
-
-                            android.location.Location
-                                .distanceBetween(
-
+                                startLatitude =
                                     current.latitude,
+
+                                startLongitude =
                                     current.longitude,
 
+                                endLatitude =
                                     homeLatitude,
-                                    homeLongitude,
 
-                                    results
-                                )
-
-
-                            results[0]
+                                endLongitude =
+                                    homeLongitude
+                            )
                                 .toInt()
 
                         } else {
 
                             route.totalDistanceMeters
                         }
-
                     }
                     ?: route.totalDistanceMeters
 
@@ -796,82 +1370,142 @@ fun TmapRouteTestScreen(
                                 FontWeight.Bold
                         )
                 )
+
+
+                BasicText(
+
+                    text =
+                        "예상 ${route.totalTimeSeconds / 60}분",
+
+                    style =
+                        TextStyle(
+
+                            color =
+                                Color.LightGray,
+
+                            fontSize =
+                                11.sp
+                        )
+                )
             }
-
-
-            BasicText(
-
-                text =
-                    "예상 소요시간: " +
-                            "${route.totalTimeSeconds / 60}분",
-
-                style =
-                    TextStyle(
-
-                        color =
-                            Color.LightGray,
-
-                        fontSize =
-                            12.sp
-                    )
-            )
 
 
             Spacer(
                 modifier =
                     Modifier.height(
-                        16.dp
+                        10.dp
                     )
             )
 
 
-            val firstGuide =
+            val currentGuide =
                 route
                     .steps
-                    .firstOrNull {
-
-                        it.turnType !=
-                                200
-                    }
+                    .getOrNull(
+                        currentGuidePosition
+                    )
 
 
             if (
-                firstGuide != null &&
+                currentGuide != null &&
+                currentGuide.turnType !=
+                TMAP_START_POINT &&
                 !completedUpdated
             ) {
 
-                val rotationDegree =
+                val guideDistance =
+                    watchLocation
+                        ?.let { current ->
 
-                    when (
-                        firstGuide.turnType
+                            distanceBetweenMeters(
+
+                                startLatitude =
+                                    current.latitude,
+
+                                startLongitude =
+                                    current.longitude,
+
+                                endLatitude =
+                                    currentGuide.latitude,
+
+                                endLongitude =
+                                    currentGuide.longitude
+                            )
+                                .toInt()
+                        }
+
+
+                val currentHeading =
+                    headingDegrees
+
+
+                val arrowRotation =
+                    if (
+                        watchLocation != null &&
+                        currentHeading != null
                     ) {
 
-                        11 ->
-                            0f
+                        val targetBearing =
+                            bearingTo(
 
-                        12 ->
-                            -90f
+                                startLatitude =
+                                    watchLocation.latitude,
 
-                        13 ->
-                            90f
+                                startLongitude =
+                                    watchLocation.longitude,
 
-                        14 ->
-                            180f
+                                endLatitude =
+                                    currentGuide.latitude,
 
-                        16,
-                        17,
-                        214,
-                        215 ->
-                            -45f
+                                endLongitude =
+                                    currentGuide.longitude
+                            )
 
-                        18,
-                        19,
-                        216,
-                        217 ->
-                            45f
 
-                        else ->
-                            0f
+                        val geomagneticField =
+                            GeomagneticField(
+
+                                watchLocation.latitude
+                                    .toFloat(),
+
+                                watchLocation.longitude
+                                    .toFloat(),
+
+                                0f,
+
+                                System.currentTimeMillis()
+                            )
+
+
+                        val trueHeading =
+                            normalize360(
+
+                                currentHeading +
+                                        geomagneticField.declination
+                            )
+
+
+                        val relativeBearing =
+                            normalize180(
+
+                                targetBearing -
+                                        trueHeading
+                            )
+
+
+                        Log.d(
+                            HEADING_TAG,
+                            "watch=${trueHeading.toInt()}° " +
+                                    "target=${targetBearing.toInt()}° " +
+                                    "arrow=${relativeBearing.toInt()}°"
+                        )
+
+
+                        relativeBearing
+
+                    } else {
+
+                        0f
                     }
 
 
@@ -881,7 +1515,7 @@ fun TmapRouteTestScreen(
                         Icons.Default.ArrowUpward,
 
                     contentDescription =
-                        "방향 화살표",
+                        "진행 방향",
 
                     tint =
                         Color(
@@ -891,43 +1525,85 @@ fun TmapRouteTestScreen(
                     modifier =
                         Modifier
                             .size(
-                                60.dp
+                                64.dp
                             )
                             .rotate(
-                                rotationDegree
+                                arrowRotation
                             )
                 )
 
 
-                Spacer(
-                    modifier =
-                        Modifier.height(
-                            12.dp
-                        )
-                )
+                if (
+                    currentHeading ==
+                    null
+                ) {
+
+                    BasicText(
+
+                        text =
+                            "방향 센서 확인 중...",
+
+                        style =
+                            TextStyle(
+
+                                color =
+                                    Color.Gray,
+
+                                fontSize =
+                                    9.sp,
+
+                                textAlign =
+                                    TextAlign.Center
+                            )
+                    )
+                }
 
 
-                BasicText(
+                /*
+                 * 사용자가 요청한 대로
+                 * "우회전 후 ...", 도로명 같은 하단 설명문은
+                 * 더 이상 표시하지 않는다.
+                 *
+                 * 화면에는 다음 안내점까지 거리만 남긴다.
+                 */
+                if (
+                    guideDistance != null &&
+                    currentGuide.turnType !=
+                    TMAP_DESTINATION_POINT
+                ) {
 
-                    text =
-                        firstGuide.description,
+                    Spacer(
+                        modifier =
+                            Modifier.height(
+                                3.dp
+                            )
+                    )
 
-                    style =
-                        TextStyle(
 
-                            color =
-                                Color.White,
+                    BasicText(
 
-                            fontSize =
-                                16.sp,
+                        text =
+                            "${guideDistance}m 후",
 
-                            fontWeight =
-                                FontWeight.Bold,
+                        style =
+                            TextStyle(
 
-                            textAlign =
-                                TextAlign.Center
-                        )
-                )
+                                color =
+                                    Color(
+                                        0xFFFFEB3B
+                                    ),
+
+                                fontSize =
+                                    13.sp,
+
+                                fontWeight =
+                                    FontWeight.Bold,
+
+                                textAlign =
+                                    TextAlign.Center
+                            )
+                    )
+                }
 
             } else {
 
@@ -954,7 +1630,7 @@ fun TmapRouteTestScreen(
                 Spacer(
                     modifier =
                         Modifier.height(
-                            8.dp
+                            5.dp
                         )
                 )
 
@@ -980,7 +1656,7 @@ fun TmapRouteTestScreen(
                                 Color.White,
 
                             fontSize =
-                                16.sp,
+                                14.sp,
 
                             fontWeight =
                                 FontWeight.Bold,
@@ -990,10 +1666,369 @@ fun TmapRouteTestScreen(
                         )
                 )
             }
+
+
+            /*
+             * =================================================
+             * 동그란 지도 버튼
+             * =================================================
+             */
+            if (
+                !completedUpdated
+            ) {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            8.dp
+                        )
+                )
+
+
+                Box(
+
+                    modifier =
+                        Modifier
+                            .size(
+                                46.dp
+                            )
+                            .clip(
+                                CircleShape
+                            )
+                            .background(
+                                Color(
+                                    0xFF2F5FE3
+                                )
+                            )
+                            .clickable {
+
+                                showMap =
+                                    true
+                            },
+
+                    contentAlignment =
+                        Alignment.Center
+                ) {
+
+                    Icon(
+
+                        imageVector =
+                            Icons.Default.Map,
+
+                        contentDescription =
+                            "지도 보기",
+
+                        tint =
+                            Color.White,
+
+                        modifier =
+                            Modifier.size(
+                                23.dp
+                            )
+                    )
+                }
+            }
         }
     }
 }
 
+
+/*
+ * =========================================================
+ * 다음 안내 Step 찾기
+ * =========================================================
+ */
+private fun findNextGuidePosition(
+
+    steps: List<NavigationStep>,
+
+    currentPosition: Int
+
+): Int {
+
+    if (
+        steps.isEmpty()
+    ) {
+
+        return 0
+    }
+
+
+    if (
+        currentPosition >=
+        steps.lastIndex
+    ) {
+
+        return steps.lastIndex
+    }
+
+
+    for (
+    index in
+    currentPosition + 1..steps.lastIndex
+    ) {
+
+        if (
+            steps[index].turnType !=
+            TMAP_START_POINT
+        ) {
+
+            return index
+        }
+    }
+
+
+    return currentPosition
+}
+
+
+/*
+ * =========================================================
+ * 두 GPS 좌표 사이 거리
+ * =========================================================
+ */
+private fun distanceBetweenMeters(
+
+    startLatitude: Double,
+
+    startLongitude: Double,
+
+    endLatitude: Double,
+
+    endLongitude: Double
+
+): Double {
+
+    val result =
+        FloatArray(
+            1
+        )
+
+
+    Location.distanceBetween(
+
+        startLatitude,
+        startLongitude,
+
+        endLatitude,
+        endLongitude,
+
+        result
+    )
+
+
+    return result[0]
+        .toDouble()
+}
+
+
+/*
+ * =========================================================
+ * 현재 위치 → 다음 안내점 방위각
+ *
+ * 0°   = 북
+ * 90°  = 동
+ * 180° = 남
+ * 270° = 서
+ * =========================================================
+ */
+private fun bearingTo(
+
+    startLatitude: Double,
+
+    startLongitude: Double,
+
+    endLatitude: Double,
+
+    endLongitude: Double
+
+): Float {
+
+    val start =
+        Location(
+            "navigation_start"
+        ).apply {
+
+            latitude =
+                startLatitude
+
+            longitude =
+                startLongitude
+        }
+
+
+    val end =
+        Location(
+            "navigation_end"
+        ).apply {
+
+            latitude =
+                endLatitude
+
+            longitude =
+                endLongitude
+        }
+
+
+    return normalize360(
+
+        start.bearingTo(
+            end
+        )
+    )
+}
+
+
+/*
+ * 가장 가까운 100m.
+ *
+ * 542 → 500
+ * 551 → 600
+ */
+private fun nearestHundred(
+    distanceMeters: Int
+): Int {
+
+    if (
+        distanceMeters <=
+        100
+    ) {
+
+        return 100
+    }
+
+
+    return (
+            (
+                    distanceMeters +
+                            50
+                    ) /
+                    100
+            ) *
+            100
+}
+
+
+/*
+ * 현재 거리보다 작은 다음 100m 경계.
+ *
+ * 563 → 500
+ * 500 → 400
+ * 399 → 300
+ */
+private fun nextLowerHundred(
+    distanceMeters: Int
+): Int? {
+
+    if (
+        distanceMeters <=
+        100
+    ) {
+
+        return null
+    }
+
+
+    val threshold =
+        if (
+            distanceMeters %
+            100 ==
+            0
+        ) {
+
+            distanceMeters -
+                    100
+
+        } else {
+
+            (
+                    distanceMeters /
+                            100
+                    ) *
+                    100
+        }
+
+
+    return threshold
+        .takeIf {
+
+            it >=
+                    100
+        }
+}
+
+
+/*
+ * 현재 거리보다 크거나 같은 가장 가까운 100m.
+ *
+ * 278 → 300
+ * 399 → 400
+ */
+private fun ceilHundred(
+    distanceMeters: Int
+): Int {
+
+    if (
+        distanceMeters <=
+        100
+    ) {
+
+        return 100
+    }
+
+
+    return (
+            (
+                    distanceMeters +
+                            99
+                    ) /
+                    100
+            ) *
+            100
+}
+
+
+/*
+ * 0 ~ 360°
+ */
+private fun normalize360(
+    angle: Float
+): Float {
+
+    return (
+            (
+                    angle %
+                            360f
+                    ) +
+                    360f
+            ) %
+            360f
+}
+
+
+/*
+ * -180 ~ +180°
+ */
+private fun normalize180(
+    angle: Float
+): Float {
+
+    return (
+            (
+                    angle +
+                            540f
+                    ) %
+                    360f
+            ) -
+            180f
+}
+
+
+/*
+ * =========================================================
+ * Constants
+ * =========================================================
+ */
 
 private const val TAG =
     "TmapRoute"
@@ -1001,3 +2036,39 @@ private const val TAG =
 
 private const val RETURN_HOME_TAG =
     "ReturnHome"
+
+
+private const val NAVIGATION_TAG =
+    "TmapNavigation"
+
+
+private const val HEADING_TAG =
+    "WatchNavigation"
+
+
+private const val VOICE_TAG =
+    "NavigationVoice"
+
+
+private const val TMAP_START_POINT =
+    200
+
+
+private const val TMAP_DESTINATION_POINT =
+    201
+
+
+private const val GUIDE_REACHED_DISTANCE_METERS =
+    15.0
+
+
+private const val GUIDE_SNAP_DISTANCE_METERS =
+    35.0
+
+
+private const val GUIDE_LOOK_AHEAD_COUNT =
+    4
+
+
+private const val ARRIVAL_VOICE_HOLD_MILLIS =
+    2_500L

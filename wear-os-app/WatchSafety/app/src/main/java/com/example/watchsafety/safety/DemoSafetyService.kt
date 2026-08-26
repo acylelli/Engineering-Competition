@@ -50,7 +50,7 @@ class DemoSafetyService : Service(), SensorEventListener {
             val gForce = sqrt((x * x + y * y + z * z).toDouble()).toFloat() / SensorManager.GRAVITY_EARTH
 
             // 🚨 시연용 임계값 (2.5g 정도면 워치를 손으로 휙! 세게 흔들면 감지됨)
-            if (gForce > 2.5f) {
+            if (gForce > 5.0f) {
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastAlertTime > 10000) { // 10초 쿨타임
                     lastAlertTime = currentTime

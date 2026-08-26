@@ -84,13 +84,34 @@
 
 
     <!-- =====================================================
-         Health Services 패키지 조회
+         패키지 / 서비스 조회
+
+         1. Health Services
+         2. Android TTS
          ===================================================== -->
 
     <queries>
 
+        <!--
+            Wear OS Health Services
+        -->
         <package
             android:name="com.google.android.wearable.healthservices" />
+
+
+        <!--
+            TextToSpeech 서비스 조회
+
+            귀가 안내 음성:
+            "집까지 약 500미터 남았습니다."
+            등을 출력하기 위해 사용
+        -->
+        <intent>
+
+            <action
+                android:name="android.intent.action.TTS_SERVICE" />
+
+        </intent>
 
     </queries>
 
