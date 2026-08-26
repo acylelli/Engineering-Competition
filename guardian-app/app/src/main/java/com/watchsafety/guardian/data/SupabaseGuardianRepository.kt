@@ -280,16 +280,6 @@ class SupabaseGuardianRepository(
             snapshot.value
 
 
-        if (
-            current.safeZones.size >= 5
-        ) {
-
-            error(
-                "안전구역은 최대 5개까지 등록할 수 있습니다."
-            )
-        }
-
-
         val normalizedName =
             name.trim()
 
@@ -397,6 +387,59 @@ class SupabaseGuardianRepository(
                     "isHome=$isHome"
         )
 
+
+        loadSnapshot()
+    }
+
+    override suspend fun updateSafeZone(
+        zoneId: String,
+        name: String,
+        radiusMeters: Int,
+        latitude: Double,
+        longitude: Double,
+        isHome: Boolean,
+    ) {
+        val normalizedName = name.trim()
+        require(normalizedName.isNotBlank()) {
+            "안전구역 이름을 입력해주세요."
+        }
+        require(latitude in -90.0..90.0) {
+            "올바르지 않은 위도입니다."
+        }
+        require(longitude in -180.0..180.0) {
+            "올바르지 않은 경도입니다."
+        }
+
+        requireGuardianId()
+
+        val parameters = buildJsonObject {
+            put("p_zone_id", zoneId)
+            put("p_name", normalizedName)
+            put("p_radius_meters", radiusMeters.coerceIn(100, 1000))
+            put("p_latitude", latitude)
+            put("p_longitude", longitude)
+            put("p_is_home", isHome)
+        }
+
+        supabase.postgrest.rpc(
+            function = "update_guardian_safe_zone",
+            parameters = parameters,
+        )
+
+        loadSnapshot()
+    }
+
+    override suspend fun deleteSafeZone(
+        zoneId: String,
+    ) {
+        supabase
+            .from("safe_zones")
+            .delete {
+                filter {
+                    eq("id", zoneId)
+                    eq("guardian_id", requireGuardianId())
+                }
+            }
 
         loadSnapshot()
     }

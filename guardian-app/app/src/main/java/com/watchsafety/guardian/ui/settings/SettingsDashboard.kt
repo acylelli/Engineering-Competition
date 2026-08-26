@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.BatteryFull
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Watch
@@ -330,30 +329,6 @@ fun SettingsScreen(
                     )
 
 
-                    HorizontalDivider(
-                        color =
-                            DividerColor
-                    )
-
-
-                    /*
-                     * -----------------------------
-                     * 위치 데이터
-                     * -----------------------------
-                     */
-
-                    MenuSettingRow(
-
-                        title =
-                            "위치 데이터 관리",
-
-                        icon =
-                            Icons.Outlined.Description,
-
-                        onClick = {
-                            // 추후 구현
-                        },
-                    )
                 }
             }
         }

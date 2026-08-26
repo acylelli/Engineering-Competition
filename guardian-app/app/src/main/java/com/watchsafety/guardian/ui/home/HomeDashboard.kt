@@ -218,9 +218,14 @@ private fun HomeHeader(
 
 @Composable
 private fun SafetySummaryCard(state: HomeUiState) {
+    val isWarning = state.safetyStatus == "주의"
+    val statusColor = if (isWarning) WarningAmber else SafeGreen
+    val containerColor = if (isWarning) WarningAmberContainer else SafeGreenContainer
+    val statusState = if (isWarning) SafetyState.WARNING else SafetyState.SAFE
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = SafeGreenContainer),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(24.dp),
     ) {
@@ -235,7 +240,7 @@ private fun SafetySummaryCard(state: HomeUiState) {
                     Icon(
                         imageVector = Icons.Rounded.Shield,
                         contentDescription = null,
-                        tint = SafeGreen,
+                        tint = statusColor,
                         modifier = Modifier.size(30.dp),
                     )
                 }
@@ -247,18 +252,18 @@ private fun SafetySummaryCard(state: HomeUiState) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = state.safetyStatus,
-                            color = SafeGreen,
+                            color = statusColor,
                             style = MaterialTheme.typography.headlineLarge,
                         )
                         StatusBadge(
-                            state = SafetyState.SAFE,
+                            state = statusState,
                             text = state.safeZoneName,
                             modifier = Modifier.padding(start = 10.dp),
                         )
                     }
                     Text(
                         text = state.safeZoneDescription,
-                        color = SafetyTextGreen,
+                        color = statusColor,
                         maxLines = 2,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -266,7 +271,7 @@ private fun SafetySummaryCard(state: HomeUiState) {
             }
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 14.dp),
-                color = SafeGreen.copy(alpha = 0.18f),
+                color = statusColor.copy(alpha = 0.18f),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -280,12 +285,12 @@ private fun SafetySummaryCard(state: HomeUiState) {
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .background(SafeGreen, CircleShape),
+                            .background(statusColor, CircleShape),
                     )
                     Text(
                         text = state.lastUpdatedText,
                         modifier = Modifier.padding(start = 8.dp),
-                        color = SafetyTextGreen,
+                        color = statusColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyMedium,
@@ -293,7 +298,7 @@ private fun SafetySummaryCard(state: HomeUiState) {
                 }
                 Text(
                     text = state.lastLocationText,
-                    color = SafetyTextGreen,
+                    color = statusColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
@@ -476,7 +481,6 @@ private fun HomeEventRow(event: HomeEventUiModel) {
     }
 }
 
-private val SafetyTextGreen = Color(0xFF31704D)
 private val SafeEventContainer = Color(0xFFDFF5F2)
 private val SafeEventColor = Color(0xFF0F9F91)
 

@@ -48,6 +48,19 @@ interface GuardianRepository {
         isHome: Boolean,
     )
 
+    suspend fun updateSafeZone(
+        zoneId: String,
+        name: String,
+        radiusMeters: Int,
+        latitude: Double,
+        longitude: Double,
+        isHome: Boolean,
+    )
+
+    suspend fun deleteSafeZone(
+        zoneId: String,
+    )
+
 
     suspend fun updateWearerName(
         name: String,

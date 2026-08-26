@@ -167,6 +167,17 @@ private fun LocationBottomSheet(
             ReturnHomeStatus.CANCELLED -> "집으로 귀가 요청"
         }
 
+    val safeZoneStatusText =
+        if (location.isInsideSafeZone) {
+            location.safeZoneName
+                .normalizedSafeZoneName()
+                .takeIf(String::isNotEmpty)
+                ?.let { "구역 안 · $it" }
+                ?: "구역 안"
+        } else {
+            "구역 밖"
+        }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -237,12 +248,7 @@ private fun LocationBottomSheet(
 
                 LocationStat(
                     label = "안전구역",
-                    value =
-                        if (location.isInsideSafeZone) {
-                            "안 · ${location.safeZoneName}"
-                        } else {
-                            "구역 밖"
-                        },
+                    value = safeZoneStatusText,
                     valueColor =
                         if (location.isInsideSafeZone) {
                             SafeGreen
@@ -343,6 +349,12 @@ private fun LocationStat(
         )
     }
 }
+
+private fun String.normalizedSafeZoneName(): String =
+    trim()
+        .removeSuffix(" 안전구역")
+        .removeSuffix("안전구역")
+        .trim()
 
 @Preview(
     showBackground = true,

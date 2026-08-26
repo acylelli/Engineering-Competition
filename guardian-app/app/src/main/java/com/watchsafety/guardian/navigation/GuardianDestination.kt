@@ -28,6 +28,12 @@ object GuardianRoute {
     const val SAFE_ZONE_ADD =
         "safe-zones/add"
 
+    const val SAFE_ZONE_EDIT =
+        "safe-zones/edit"
+
+    fun safeZoneEdit(zoneId: String): String =
+        "$SAFE_ZONE_EDIT/$zoneId"
+
     const val EMERGENCY =
         "emergency"
 

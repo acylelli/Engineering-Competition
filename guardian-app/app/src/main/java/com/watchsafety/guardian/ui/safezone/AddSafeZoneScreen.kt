@@ -90,6 +90,16 @@ fun AddSafeZoneScreen(
      */
     existingHomeName: String?,
 
+    initialName: String = "안전구역",
+
+    initialRadiusMeters: Int = 300,
+
+    initialIsHome: Boolean = false,
+
+    screenTitle: String = "안전구역 추가",
+
+    saveButtonText: String = "안전구역 저장하기",
+
     onBack: () -> Unit,
 
     onSave: (
@@ -102,9 +112,9 @@ fun AddSafeZoneScreen(
 ) {
 
     var zoneName by
-    rememberSaveable {
+    rememberSaveable(initialName) {
         mutableStateOf(
-            "안전구역"
+            initialName
         )
     }
 
@@ -115,9 +125,9 @@ fun AddSafeZoneScreen(
      * =====================================================
      */
     var isHome by
-    rememberSaveable {
+    rememberSaveable(initialIsHome) {
         mutableStateOf(
-            false
+            initialIsHome
         )
     }
 
@@ -128,9 +138,9 @@ fun AddSafeZoneScreen(
      * =====================================================
      */
     var radius by
-    rememberSaveable {
+    rememberSaveable(initialRadiusMeters) {
         mutableFloatStateOf(
-            300f
+            initialRadiusMeters.toFloat()
         )
     }
 
@@ -296,7 +306,7 @@ fun AddSafeZoneScreen(
             GuardianTopBar(
 
                 title =
-                    "안전구역 추가",
+                    screenTitle,
 
                 onBack =
                     onBack,
@@ -1219,7 +1229,7 @@ fun AddSafeZoneScreen(
                     Text(
 
                         text =
-                            "안전구역 저장하기",
+                            saveButtonText,
 
                         modifier =
                             Modifier

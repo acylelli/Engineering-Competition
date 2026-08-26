@@ -440,6 +440,16 @@ fun GuardianApp(
                 addSafeZone,
 
 
+            onUpdateSafeZone =
+                guardianViewModel::
+                updateSafeZone,
+
+
+            onDeleteSafeZone =
+                guardianViewModel::
+                deleteSafeZone,
+
+
             /*
              * 착용자 이름 변경
              */

@@ -1,6 +1,7 @@
 package com.watchsafety.guardian.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 
 import androidx.navigation.NavHostController
@@ -64,6 +65,19 @@ fun GuardianNavGraph(
         Double,
         Boolean,
     ) -> Unit,
+
+    onUpdateSafeZone:
+        (
+        String,
+        String,
+        Int,
+        Double,
+        Double,
+        Boolean,
+    ) -> Unit,
+
+    onDeleteSafeZone:
+        (String) -> Unit,
 
     onWearerNameChange:
         (String) -> Unit,
@@ -348,6 +362,15 @@ fun GuardianNavGraph(
                             GuardianRoute.SAFE_ZONE_ADD
                         )
                 },
+
+                onEditClick = { zoneId ->
+                    navController.navigate(
+                        GuardianRoute.safeZoneEdit(zoneId)
+                    )
+                },
+
+                onDelete =
+                    onDeleteSafeZone,
             )
         }
 
@@ -432,6 +455,48 @@ fun GuardianNavGraph(
                         .popBackStack()
                 },
             )
+        }
+
+        composable(
+            "${GuardianRoute.SAFE_ZONE_EDIT}/{zoneId}"
+        ) { backStackEntry ->
+            val zoneId = backStackEntry.arguments?.getString("zoneId")
+            val zone = snapshot.safeZones.firstOrNull { it.id == zoneId }
+
+            if (zone == null) {
+                LaunchedEffect(zoneId) {
+                    navController.popBackStack()
+                }
+            } else {
+                val existingHomeName = snapshot.safeZones
+                    .firstOrNull {
+                        it.kind == SafeZoneKind.HOME && it.id != zone.id
+                    }
+                    ?.name
+
+                AddSafeZoneScreen(
+                    initialLatitude = zone.centerLatitude,
+                    initialLongitude = zone.centerLongitude,
+                    existingHomeName = existingHomeName,
+                    initialName = zone.name,
+                    initialRadiusMeters = zone.radiusMeters,
+                    initialIsHome = zone.kind == SafeZoneKind.HOME,
+                    screenTitle = "안전구역 수정",
+                    saveButtonText = "변경사항 저장",
+                    onBack = navController::popBackStack,
+                    onSave = { name, radius, latitude, longitude, isHome ->
+                        onUpdateSafeZone(
+                            zone.id,
+                            name,
+                            radius,
+                            latitude,
+                            longitude,
+                            isHome,
+                        )
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
 
 

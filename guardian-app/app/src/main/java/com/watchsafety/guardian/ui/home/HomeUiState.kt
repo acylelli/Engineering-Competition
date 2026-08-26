@@ -57,12 +57,23 @@ enum class HomeEventType {
 }
 
 fun GuardianSnapshot.toHomeUiState(): HomeUiState {
+    val normalizedSafeZoneName =
+        location.safeZoneName
+            .trim()
+            .removeSuffix(" 안전구역")
+            .removeSuffix("안전구역")
+            .trim()
+
     return HomeUiState(
         userName = user.name,
         safetyStatus = if (location.isInsideSafeZone) "안전" else "주의",
         safeZoneName = if (location.isInsideSafeZone) "안전구역 안" else "안전구역 밖",
         safeZoneDescription = if (location.isInsideSafeZone) {
-            "${location.safeZoneName} 안전구역 안에서 활동 중이에요"
+            if (normalizedSafeZoneName.isEmpty()) {
+                "안전구역 안에서 활동 중이에요"
+            } else {
+                "$normalizedSafeZoneName 안전구역 안에서 활동 중이에요"
+            }
         } else {
             "안전구역을 벗어난 상태예요"
         },

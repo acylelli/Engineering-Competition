@@ -4,7 +4,19 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.gms.google-services")
+}
+
+val hasGoogleServicesConfig = sequenceOf(
+    file("google-services.json"),
+    file("src/google-services.json"),
+    file("src/debug/google-services.json"),
+    file("src/release/google-services.json"),
+).any { it.isFile }
+
+if (hasGoogleServicesConfig) {
+    pluginManager.apply("com.google.gms.google-services")
+} else {
+    logger.warn("google-services.json not found; Firebase resource generation is disabled.")
 }
 
 val localProperties = Properties().apply {

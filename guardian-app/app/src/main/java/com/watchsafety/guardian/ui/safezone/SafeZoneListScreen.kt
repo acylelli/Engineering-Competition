@@ -18,7 +18,9 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -29,7 +31,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,8 +54,6 @@ import com.watchsafety.guardian.ui.theme.SafeGreenContainer
 import com.watchsafety.guardian.ui.theme.TextDisabled
 import com.watchsafety.guardian.ui.theme.TrustBlue
 import com.watchsafety.guardian.ui.theme.TrustBlueContainer
-import com.watchsafety.guardian.ui.theme.WarningAmber
-import com.watchsafety.guardian.ui.theme.WarningAmberContainer
 import com.watchsafety.guardian.ui.theme.WatchSafetyTheme
 
 @Composable
@@ -57,7 +62,11 @@ fun SafeZoneListScreen(
     onEnabledChange: (String, Boolean) -> Unit,
     onBack: () -> Unit,
     onAddClick: () -> Unit,
+    onEditClick: (String) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
+    var zonePendingDeletion by remember { mutableStateOf<SafeZone?>(null) }
+
     Scaffold(
         topBar = { GuardianTopBar(title = "안전구역 관리", onBack = onBack) },
     ) { innerPadding ->
@@ -80,6 +89,8 @@ fun SafeZoneListScreen(
                 SafeZoneCard(
                     zone = zone,
                     onEnabledChange = { enabled -> onEnabledChange(zone.id, enabled) },
+                    onEditClick = { onEditClick(zone.id) },
+                    onDeleteClick = { zonePendingDeletion = zone },
                 )
             }
             item {
@@ -96,36 +107,38 @@ fun SafeZoneListScreen(
                     )
                 }
             }
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(WarningAmberContainer, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.WarningAmber,
-                            contentDescription = null,
-                            tint = WarningAmber,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    Text(
-                        text = "안전구역은 최대 5개까지 설정할 수 있어요.\n구역 이탈 시 워치에도 진동 안내가 전달돼요.",
-                        modifier = Modifier.padding(start = 10.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
         }
+    }
+
+    zonePendingDeletion?.let { zone ->
+        AlertDialog(
+            onDismissRequest = { zonePendingDeletion = null },
+            title = { Text("안전구역 삭제") },
+            text = {
+                Text(
+                    if (zone.kind == SafeZoneKind.HOME) {
+                        "'${zone.name}'은 집으로 지정된 구역입니다. 삭제하면 워치의 귀가 및 집 안전구역 감지가 중단됩니다. 삭제할까요?"
+                    } else {
+                        "'${zone.name}' 안전구역을 삭제할까요?"
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        zonePendingDeletion = null
+                        onDelete(zone.id)
+                    },
+                ) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { zonePendingDeletion = null }) {
+                    Text("취소")
+                }
+            },
+        )
     }
 }
 
@@ -133,6 +146,8 @@ fun SafeZoneListScreen(
 private fun SafeZoneCard(
     zone: SafeZone,
     onEnabledChange: (Boolean) -> Unit,
+    onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit,
 ) {
     val colors = when (zone.kind) {
         SafeZoneKind.HOME -> SafeGreenContainer to SafeGreen
@@ -213,11 +228,29 @@ private fun SafeZoneCard(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                Text(
-                    text = "수정",
-                    color = TrustBlue,
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Row {
+                    TextButton(onClick = onEditClick) {
+                        Icon(
+                            imageVector = Icons.Rounded.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text("수정", modifier = Modifier.padding(start = 4.dp))
+                    }
+                    TextButton(onClick = onDeleteClick) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            "삭제",
+                            modifier = Modifier.padding(start = 4.dp),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
     }
@@ -249,6 +282,8 @@ private fun SafeZoneListPreview() {
             onEnabledChange = { _, _ -> },
             onBack = {},
             onAddClick = {},
+            onEditClick = {},
+            onDelete = {},
         )
     }
 }

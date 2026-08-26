@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.UUID
 import kotlinx.coroutines.flow.emptyFlow
 
 class MockGuardianRepository : GuardianRepository {
@@ -121,14 +122,6 @@ class MockGuardianRepository : GuardianRepository {
             _snapshot.value
 
 
-        if (
-            current.safeZones.size >= 5
-        ) {
-
-            return
-        }
-
-
         /*
          * 새 안전구역을 HOME으로 지정하면
          * 기존 HOME은 OTHER로 변경.
@@ -168,7 +161,7 @@ class MockGuardianRepository : GuardianRepository {
             SafeZone(
 
                 id =
-                    "zone-${current.safeZones.size + 1}",
+                    UUID.randomUUID().toString(),
 
                 name =
                     name.trim(),
@@ -210,6 +203,57 @@ class MockGuardianRepository : GuardianRepository {
                     normalizedExistingZones +
                             newZone
             )
+    }
+
+    override suspend fun updateSafeZone(
+        zoneId: String,
+        name: String,
+        radiusMeters: Int,
+        latitude: Double,
+        longitude: Double,
+        isHome: Boolean,
+    ) {
+        val normalizedName = name.trim()
+        require(normalizedName.isNotBlank()) {
+            "안전구역 이름을 입력해주세요."
+        }
+
+        val current = _snapshot.value
+        require(current.safeZones.any { it.id == zoneId }) {
+            "수정할 안전구역을 찾을 수 없습니다."
+        }
+
+        _snapshot.value = current.copy(
+            safeZones = current.safeZones.map { zone ->
+                when {
+                    isHome && zone.id != zoneId && zone.kind == SafeZoneKind.HOME ->
+                        zone.copy(kind = SafeZoneKind.OTHER)
+
+                    zone.id == zoneId ->
+                        zone.copy(
+                            name = normalizedName,
+                            radiusMeters = radiusMeters.coerceIn(100, 1000),
+                            centerLatitude = latitude,
+                            centerLongitude = longitude,
+                            kind = when {
+                                isHome -> SafeZoneKind.HOME
+                                zone.kind == SafeZoneKind.HOME -> SafeZoneKind.OTHER
+                                else -> zone.kind
+                            },
+                        )
+
+                    else -> zone
+                }
+            },
+        )
+    }
+
+    override suspend fun deleteSafeZone(
+        zoneId: String,
+    ) {
+        _snapshot.value = _snapshot.value.copy(
+            safeZones = _snapshot.value.safeZones.filterNot { it.id == zoneId },
+        )
     }
 
     override suspend fun updateWearerName(

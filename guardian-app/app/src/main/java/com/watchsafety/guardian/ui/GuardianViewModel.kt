@@ -280,6 +280,34 @@ class GuardianViewModel(
         }
     }
 
+    fun updateSafeZone(
+        zoneId: String,
+        name: String,
+        radiusMeters: Int,
+        latitude: Double,
+        longitude: Double,
+        isHome: Boolean,
+    ) {
+        launchRepositoryAction {
+            repository.updateSafeZone(
+                zoneId = zoneId,
+                name = name,
+                radiusMeters = radiusMeters,
+                latitude = latitude,
+                longitude = longitude,
+                isHome = isHome,
+            )
+        }
+    }
+
+    fun deleteSafeZone(
+        zoneId: String,
+    ) {
+        launchRepositoryAction {
+            repository.deleteSafeZone(zoneId)
+        }
+    }
+
 
     /*
      * =====================================================
