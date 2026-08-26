@@ -82,6 +82,9 @@ fun GuardianNavGraph(
     onWearerNameChange:
         (String) -> Unit,
 
+    onEmergencyPhoneNumberChange:
+        (String) -> Unit,
+
     onNotificationSettingsChange:
         (NotificationSettings) -> Unit,
 
@@ -263,6 +266,12 @@ fun GuardianNavGraph(
 
                 settings =
                     snapshot.notificationSettings,
+
+                emergencyPhoneNumber =
+                    snapshot.user.emergencyPhoneNumber,
+
+                onEmergencyPhoneNumberChange =
+                    onEmergencyPhoneNumberChange,
 
                 onSettingsChange =
                     onNotificationSettingsChange,

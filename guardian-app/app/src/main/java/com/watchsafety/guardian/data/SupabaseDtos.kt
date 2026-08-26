@@ -8,6 +8,7 @@ data class GuardianProfileDto(
     @SerialName("guardian_id") val guardianId: String,
     @SerialName("display_name") val displayName: String,
     val relationship: String,
+    @SerialName("emergency_phone_number") val emergencyPhoneNumber: String? = null,
 )
 
 @Serializable

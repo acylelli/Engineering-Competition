@@ -459,6 +459,11 @@ fun GuardianApp(
                 updateWearerName,
 
 
+            onEmergencyPhoneNumberChange =
+                guardianViewModel::
+                updateEmergencyPhoneNumber,
+
+
             /*
              * 알림 설정
              */

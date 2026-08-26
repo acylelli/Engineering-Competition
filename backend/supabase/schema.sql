@@ -5,6 +5,11 @@ create table public.guardian_profiles (
   guardian_id uuid primary key references auth.users (id) on delete cascade,
   display_name text not null,
   relationship text not null default '보호자',
+  emergency_phone_number text
+    check (
+      emergency_phone_number is null
+      or emergency_phone_number ~ '^\\+?[0-9]{8,15}$'
+    ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -34,6 +39,7 @@ create table public.devices (
   id uuid primary key default gen_random_uuid(),
   guardian_id uuid not null references auth.users (id) on delete cascade,
   wearer_id uuid not null,
+  watch_auth_id uuid unique references auth.users (id) on delete set null,
   device_name text not null,
   battery_percent integer not null default 100 check (battery_percent between 0 and 100),
   is_connected boolean not null default false,
@@ -290,6 +296,195 @@ grant select, insert, update, delete on table
 to authenticated;
 
 grant usage, select on sequence public.locations_id_seq to authenticated;
+
+create or replace function public.add_guardian_safe_zone(
+  p_wearer_id uuid,
+  p_name text,
+  p_radius_meters integer,
+  p_latitude double precision,
+  p_longitude double precision,
+  p_is_home boolean
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_guardian_id uuid := auth.uid();
+  v_zone_id uuid;
+begin
+  if v_guardian_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if trim(coalesce(p_name, '')) = '' then
+    raise exception 'Safe zone name is required';
+  end if;
+
+  if not exists (
+    select 1
+    from public.wearers w
+    where w.id = p_wearer_id
+      and w.guardian_id = v_guardian_id
+  ) then
+    raise exception 'Wearer does not belong to guardian';
+  end if;
+
+  if coalesce(p_is_home, false) then
+    update public.safe_zones
+    set kind = 'OTHER', updated_at = now()
+    where guardian_id = v_guardian_id
+      and wearer_id = p_wearer_id
+      and kind = 'HOME';
+  end if;
+
+  insert into public.safe_zones (
+    guardian_id,
+    wearer_id,
+    name,
+    address,
+    center_latitude,
+    center_longitude,
+    radius_meters,
+    enabled,
+    kind
+  ) values (
+    v_guardian_id,
+    p_wearer_id,
+    trim(p_name),
+    '지도에서 선택한 위치',
+    p_latitude,
+    p_longitude,
+    greatest(100, least(p_radius_meters, 1000)),
+    true,
+    case when coalesce(p_is_home, false) then 'HOME' else 'OTHER' end
+  )
+  returning id into v_zone_id;
+
+  return v_zone_id;
+end;
+$$;
+
+revoke execute on function public.add_guardian_safe_zone(
+  uuid, text, integer, double precision, double precision, boolean
+) from public, anon;
+grant execute on function public.add_guardian_safe_zone(
+  uuid, text, integer, double precision, double precision, boolean
+) to authenticated;
+
+create or replace function public.update_guardian_safe_zone(
+  p_zone_id uuid,
+  p_name text,
+  p_radius_meters integer,
+  p_latitude double precision,
+  p_longitude double precision,
+  p_is_home boolean
+)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_guardian_id uuid := auth.uid();
+  v_wearer_id uuid;
+  v_current_kind text;
+begin
+  if v_guardian_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if trim(coalesce(p_name, '')) = '' then
+    raise exception 'Safe zone name is required';
+  end if;
+
+  select sz.wearer_id, sz.kind
+  into v_wearer_id, v_current_kind
+  from public.safe_zones sz
+  where sz.id = p_zone_id
+    and sz.guardian_id = v_guardian_id;
+
+  if v_wearer_id is null then
+    raise exception 'Safe zone not found';
+  end if;
+
+  if coalesce(p_is_home, false) then
+    update public.safe_zones
+    set kind = 'OTHER', updated_at = now()
+    where guardian_id = v_guardian_id
+      and wearer_id = v_wearer_id
+      and kind = 'HOME'
+      and id <> p_zone_id;
+  end if;
+
+  update public.safe_zones
+  set
+    name = trim(p_name),
+    radius_meters = greatest(100, least(p_radius_meters, 1000)),
+    center_latitude = p_latitude,
+    center_longitude = p_longitude,
+    kind = case
+      when coalesce(p_is_home, false) then 'HOME'
+      when v_current_kind = 'HOME' then 'OTHER'
+      else v_current_kind
+    end,
+    updated_at = now()
+  where id = p_zone_id
+    and guardian_id = v_guardian_id;
+end;
+$$;
+
+revoke execute on function public.update_guardian_safe_zone(
+  uuid, text, integer, double precision, double precision, boolean
+) from public, anon;
+grant execute on function public.update_guardian_safe_zone(
+  uuid, text, integer, double precision, double precision, boolean
+) to authenticated;
+
+-- A watch uses an anonymous Supabase Auth account. This narrowly scoped RPC
+-- returns only the emergency number belonging to that exact paired watch.
+create or replace function public.get_watch_emergency_contact()
+returns table (
+  is_configured boolean,
+  contact_name text,
+  phone_number text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_watch_auth_id uuid := auth.uid();
+begin
+  if v_watch_auth_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  return query
+  select
+    gp.emergency_phone_number is not null,
+    gp.display_name,
+    gp.emergency_phone_number
+  from public.devices d
+  join public.guardian_profiles gp
+    on gp.guardian_id = d.guardian_id
+  where d.watch_auth_id = v_watch_auth_id
+  order by d.updated_at desc
+  limit 1;
+
+  if not found then
+    return query
+    select false, null::text, null::text;
+  end if;
+end;
+$$;
+
+revoke all on function public.get_watch_emergency_contact()
+from public, anon;
+grant execute on function public.get_watch_emergency_contact()
+to authenticated;
 
 create or replace function public.bootstrap_guardian_demo()
 returns uuid

@@ -5,6 +5,7 @@ data class GuardianUser(
     val name: String,
     val guardianName: String,
     val guardianRelationship: String,
+    val emergencyPhoneNumber: String = "",
 )
 
 data class WatchStatus(

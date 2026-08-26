@@ -301,6 +301,35 @@ class MockGuardianRepository : GuardianRepository {
             )
     }
 
+    override suspend fun updateEmergencyPhoneNumber(
+        phoneNumber: String,
+    ) {
+        val normalizedPhoneNumber =
+            phoneNumber
+                .trim()
+                .filterIndexed { index, character ->
+                    character.isDigit() ||
+                            (character == '+' && index == 0)
+                }
+
+        require(
+            normalizedPhoneNumber.matches(
+                Regex("^\\+?[0-9]{8,15}$")
+            )
+        ) {
+            "전화번호를 정확히 입력해주세요."
+        }
+
+        _snapshot.value =
+            _snapshot.value.copy(
+                user =
+                    _snapshot.value.user.copy(
+                        emergencyPhoneNumber =
+                            normalizedPhoneNumber
+                    )
+            )
+    }
+
     override suspend fun redeemPairingCode(
         code: String,
     ) {
@@ -316,6 +345,7 @@ class MockGuardianRepository : GuardianRepository {
                     name = "워치 사용자",
                     guardianName = "보호자",
                     guardianRelationship = "",
+                    emergencyPhoneNumber = "01012345678",
                 ),
             watchStatus =
                 WatchStatus(

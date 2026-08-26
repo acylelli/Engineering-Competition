@@ -17,28 +17,38 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Watch
 
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 
 import com.watchsafety.guardian.data.MockGuardianRepository
 import com.watchsafety.guardian.domain.model.GuardianUser
@@ -63,6 +73,11 @@ fun SettingsScreen(
 
     settings: NotificationSettings,
 
+    emergencyPhoneNumber: String,
+
+    onEmergencyPhoneNumberChange:
+        (String) -> Unit,
+
     onSettingsChange:
         (NotificationSettings) -> Unit,
 
@@ -79,6 +94,33 @@ fun SettingsScreen(
         () -> Unit,
 
     ) {
+
+    var showEmergencyPhoneDialog by
+        remember {
+            mutableStateOf(false)
+        }
+
+    var emergencyPhoneDraft by
+        remember(
+            emergencyPhoneNumber
+        ) {
+            mutableStateOf(
+                emergencyPhoneNumber
+            )
+        }
+
+    val normalizedEmergencyPhone =
+        emergencyPhoneDraft
+            .trim()
+            .filterIndexed { index, character ->
+                character.isDigit() ||
+                        (character == '+' && index == 0)
+            }
+
+    val isEmergencyPhoneValid =
+        normalizedEmergencyPhone.matches(
+            Regex("^\\+?[0-9]{8,15}$")
+        )
 
     Scaffold(
 
@@ -285,6 +327,24 @@ fun SettingsScreen(
                 SettingsCard {
 
 
+                    EmergencyContactRow(
+                        phoneNumber =
+                            emergencyPhoneNumber,
+                        onClick = {
+                            emergencyPhoneDraft =
+                                emergencyPhoneNumber
+                            showEmergencyPhoneDialog =
+                                true
+                        },
+                    )
+
+
+                    HorizontalDivider(
+                        color =
+                            DividerColor
+                    )
+
+
                     /*
                      * -----------------------------
                      * 워치 연결
@@ -332,6 +392,186 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+
+    if (
+        showEmergencyPhoneDialog
+    ) {
+
+        AlertDialog(
+            onDismissRequest = {
+                showEmergencyPhoneDialog =
+                    false
+            },
+            title = {
+                Text(
+                    "긴급 연락처"
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement =
+                        Arrangement.spacedBy(
+                            8.dp
+                        )
+                ) {
+                    Text(
+                        "워치에서 SOS 또는 낙상이 발생하면 이 번호로 바로 전화합니다.",
+                        color =
+                            TextSecondary,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value =
+                            emergencyPhoneDraft,
+                        onValueChange = {
+                            emergencyPhoneDraft =
+                                it
+                        },
+                        label = {
+                            Text(
+                                "보호자 전화번호"
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                "01012345678"
+                            )
+                        },
+                        keyboardOptions =
+                            KeyboardOptions(
+                                keyboardType =
+                                    KeyboardType.Phone
+                            ),
+                        singleLine =
+                            true,
+                        isError =
+                            emergencyPhoneDraft
+                                .isNotBlank() &&
+                                    !isEmergencyPhoneValid,
+                    )
+                    Text(
+                        "숫자 8~15자리 또는 +국가번호 형식으로 입력해주세요.",
+                        color =
+                            TextSecondary,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .labelSmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled =
+                        isEmergencyPhoneValid,
+                    onClick = {
+                        onEmergencyPhoneNumberChange(
+                            normalizedEmergencyPhone
+                        )
+                        showEmergencyPhoneDialog =
+                            false
+                    },
+                ) {
+                    Text(
+                        "저장"
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showEmergencyPhoneDialog =
+                            false
+                    },
+                ) {
+                    Text(
+                        "취소"
+                    )
+                }
+            },
+        )
+    }
+}
+
+
+@Composable
+private fun EmergencyContactRow(
+    phoneNumber: String,
+    onClick: () -> Unit,
+) {
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(
+                    onClick =
+                        onClick
+                )
+                .padding(
+                    vertical =
+                        14.dp
+                ),
+        verticalAlignment =
+            Alignment.CenterVertically,
+    ) {
+
+        Icon(
+            imageVector =
+                Icons.Outlined.Phone,
+            contentDescription =
+                null,
+            tint =
+                TrustBlue,
+        )
+
+        Column(
+            modifier =
+                Modifier
+                    .weight(
+                        1f
+                    )
+                    .padding(
+                        start =
+                            12.dp
+                    )
+        ) {
+            Text(
+                text =
+                    "긴급 연락처",
+                fontWeight =
+                    FontWeight.SemiBold,
+            )
+            Text(
+                text =
+                    phoneNumber.ifBlank {
+                        "전화번호를 등록해주세요"
+                    },
+                color =
+                    TextSecondary,
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
+            )
+        }
+
+        Icon(
+            imageVector =
+                Icons
+                    .AutoMirrored
+                    .Rounded
+                    .KeyboardArrowRight,
+            contentDescription =
+                "긴급 연락처 수정",
+            tint =
+                TextSecondary,
+        )
     }
 }
 
@@ -1019,6 +1259,13 @@ private fun SettingsDashboardPreview() {
             settings =
                 preview
                     .notificationSettings,
+
+            emergencyPhoneNumber =
+                preview
+                    .user
+                    .emergencyPhoneNumber,
+
+            onEmergencyPhoneNumberChange = {},
 
             onSettingsChange = {},
 
