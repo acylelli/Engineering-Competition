@@ -1,22 +1,26 @@
 package com.example.watchsafety.ui
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.util.Log
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MyLocation
 
 import androidx.compose.runtime.Composable
@@ -26,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
-import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.Icon
 
 import com.example.watchsafety.BuildConfig
@@ -56,29 +60,28 @@ import kotlinx.coroutines.delay
 
 /*
  * =========================================================
- * TMAP v3.7 귀가 경로 지도
+ * TMAP VectorMap 귀가 경로 지도
  * =========================================================
  *
- * 안전한 초기화 순서
+ * 동작
  *
- * 1. TMapView 생성
- * 2. Listener 등록
- * 3. API Key 설정
- * 4. onMapReady 대기
- * 5. onMapReady 이후에만:
- *      - 현재 위치 아이콘
- *      - 지도 설정
- *      - 경로선
- *      - 집 마커
- *      - 카메라 이동
+ * 1. 지도 버튼을 누르면 TMAP 지도를 연다.
+ * 2. 지도 준비 완료 후 실제 보행 경로선을 그린다.
+ * 3. 집 마커를 표시한다.
+ * 4. 처음에는 전체 경로를 약 1.7초 보여준다.
+ * 5. 이후 현재 위치 중심 + 줌 17로 이동한다.
+ * 6. GPS 위치가 갱신될 때마다 현재 위치를 따라간다.
  *
- * 초기화 중 예외가 발생해도 앱을 종료시키지 않고
- * 오류 화면을 표시한다.
+ * 중요
+ *
+ * TMAP VectorMap은 지도 준비 전 API를 호출하면
+ * 정상적으로 적용되지 않을 수 있으므로
+ * setOnMapReadyListener 이후에만 경로/마커/카메라를 조작한다.
  */
 @Composable
 fun TmapRouteMapScreen(
 
-    routeResult: TmapRouteResult,
+    routeResult: TmapRouteResult?,
 
     watchLocation: WatchLocation?,
 
@@ -86,6 +89,13 @@ fun TmapRouteMapScreen(
 
     homeLongitude: Double?,
 
+    /*
+     * 기본 화살표 화면과 동일한 함수 시그니처를 유지하기 위해
+     * 전달받는다.
+     *
+     * 현재 지도 화면은 "위쪽=북쪽" 고정형으로 두고
+     * 위치 추적만 수행한다.
+     */
     @Suppress("UNUSED_PARAMETER")
     headingDegrees: Float?,
 
@@ -97,40 +107,25 @@ fun TmapRouteMapScreen(
         LocalContext.current
 
 
-    /*
-     * =====================================================
-     * 지도 상태
-     * =====================================================
-     */
-
-    var isMapReady by
+    var mapLoadState by
     remember {
 
         mutableStateOf(
-            false
+            TmapMapLoadState.INITIALIZING
         )
     }
 
 
-    var isRoutePrepared by
+    var retryGeneration by
     remember {
 
         mutableStateOf(
-            false
+            0
         )
     }
 
 
-    var followCurrentLocation by
-    remember {
-
-        mutableStateOf(
-            false
-        )
-    }
-
-
-    var mapErrorMessage by
+    var mapFailureDetail by
     remember {
 
         mutableStateOf<String?>(
@@ -139,11 +134,25 @@ fun TmapRouteMapScreen(
     }
 
 
-    var loadingMessage by
-    remember {
+    val isMapReady =
+        mapLoadState ==
+            TmapMapLoadState.READY
+
+
+    val routePoints =
+        routeResult
+            ?.routePoints
+            .orEmpty()
+
+
+    var initialRouteShown by
+    remember(
+        routeResult,
+        retryGeneration
+    ) {
 
         mutableStateOf(
-            "지도 불러오는 중..."
+            false
         )
     }
 
@@ -151,90 +160,28 @@ fun TmapRouteMapScreen(
     /*
      * =====================================================
      * TMapView 생성
+     * =====================================================
      *
-     * 생성자 자체에서 문제가 발생하더라도
-     * runCatching으로 앱 강제 종료 방지.
-     * =====================================================
+     * 공식 TMAP Compose 관련 사례처럼:
+     *
+     * 1. 모든 리스너를 먼저 설정
+     * 2. AndroidView가 실제 Window에 붙은 뒤 API Key 설정
+     * 3. SDK 자체 attach/detach lifecycle에 맡긴다.
      */
-    val mapViewResult =
-        remember(
-            context
-        ) {
-
-            runCatching {
-
-                TMapView(
-                    context
-                )
-            }
-        }
-
-
     val tMapView =
-        mapViewResult
-            .getOrNull()
-
-
-    /*
-     * 생성 자체 실패
-     */
-    LaunchedEffect(
-        mapViewResult
-    ) {
-
-        val error =
-            mapViewResult
-                .exceptionOrNull()
-
-
-        if (
-            error != null
+        remember(
+            context,
+            retryGeneration
         ) {
 
-            Log.e(
-                TAG,
-                "TMapView 생성 실패",
-                error
-            )
+            TMapView(
+                context
+                )
+                .apply {
 
+                    setOnApiKeyListenerCallback(
 
-            mapErrorMessage =
-                "지도를 시작하지 못했습니다."
-
-
-            loadingMessage =
-                "지도 초기화 실패"
-        }
-    }
-
-
-    /*
-     * =====================================================
-     * Listener + API Key + Lifecycle
-     * =====================================================
-     */
-    DisposableEffect(
-        tMapView
-    ) {
-
-        if (
-            tMapView == null
-        ) {
-
-            onDispose { }
-
-        } else {
-
-            try {
-
-                /*
-                 * API Key 성공/실패를 직접 확인.
-                 */
-                tMapView
-                    .setOnApiKeyListenerCallback(
-
-                        object :
-                            TMapView.OnApiKeyListenerCallback {
+                        object : TMapView.OnApiKeyListenerCallback {
 
                             override fun onSKTMapApikeySucceed() {
 
@@ -242,237 +189,139 @@ fun TmapRouteMapScreen(
                                     TAG,
                                     "TMAP API Key 인증 성공"
                                 )
-
-
-                                loadingMessage =
-                                    "지도 준비 중..."
                             }
 
 
                             override fun onSKTMapApikeyFailed(
-                                errorMsg: String?
+                                errorMessage: String?
                             ) {
 
                                 Log.e(
                                     TAG,
-                                    "TMAP API Key 인증 실패: $errorMsg"
+                                    "TMAP API Key 인증 실패: $errorMessage"
                                 )
 
 
-                                mapErrorMessage =
-                                    if (
-                                        errorMsg.isNullOrBlank()
-                                    ) {
+                                mapFailureDetail =
+                                    errorMessage
 
-                                        "TMAP 인증에 실패했습니다."
 
-                                    } else {
-
-                                        "TMAP 인증 실패\n$errorMsg"
-                                    }
+                                mapLoadState =
+                                    TmapMapLoadState.API_KEY_FAILED
                             }
                         }
                     )
 
 
-                /*
-                 * 지도 엔진 준비 완료.
-                 *
-                 * 여기까지 오기 전에는 지도 관련 설정을 하지 않는다.
-                 */
-                tMapView
-                    .setOnMapReadyListener(
+                    setOnConfigLoadedListener {
 
-                        object :
-                            TMapView.OnMapReadyListener {
-
-                            override fun onMapReady() {
-
-                                Log.d(
-                                    TAG,
-                                    "TMAP onMapReady"
-                                )
+                        Log.d(
+                            TAG,
+                            "TMAP VectorMap 설정 로드 완료"
+                        )
+                    }
 
 
-                                try {
+                    setOnMapReadyListener {
 
-                                    /*
-                                     * 지도 준비 완료 이후에만 설정.
-                                     */
-                                    tMapView.setIconVisibility(
-                                        true
-                                    )
+                        Log.d(
+                            TAG,
+                            "TMAP VectorMap 준비 완료"
+                        )
 
 
-                                    tMapView.setCompassMode(
-                                        false
-                                    )
+                        mapFailureDetail =
+                            null
 
 
-                                    tMapView.setTrackingMode(
-                                        false
-                                    )
+                        mapLoadState =
+                            TmapMapLoadState.READY
+                    }
 
 
-                                    tMapView.setUserScrollMoveEnable(
-                                        true
-                                    )
-
-
-                                    tMapView.setUserScrollZoomEnable(
-                                        true
-                                    )
-
-
-                                    /*
-                                     * Wear OS에서는 과도한 FPS가 필요하지 않으므로
-                                     * 적당한 값으로 제한.
-                                     *
-                                     * v3.7에 추가된 공식 API.
-                                     */
-                                    tMapView.setFPS(
-                                        MAP_FPS
-                                    )
-
-
-                                    isMapReady =
-                                        true
-
-
-                                    loadingMessage =
-                                        "경로 불러오는 중..."
-
-
-                                    mapErrorMessage =
-                                        null
-
-
-                                } catch (
-                                    error: Throwable
-                                ) {
-
-                                    Log.e(
-                                        TAG,
-                                        "onMapReady 후 지도 설정 실패",
-                                        error
-                                    )
-
-
-                                    mapErrorMessage =
-                                        "지도 설정 중 오류가 발생했습니다."
-                                }
-                            }
-                        }
+                    /*
+                     * 현재 위치 표시는 직접 WatchLocation을 넣는다.
+                     */
+                    setIconVisibility(
+                        true
                     )
 
 
-                /*
-                 * Listener를 먼저 등록한 다음
-                 * 마지막에 API Key 설정.
-                 */
-                if (
-                    BuildConfig.TMAP_APP_KEY.isBlank()
-                ) {
+                    /*
+                     * 지도 자체를 워치 방향으로 회전시키지 않는다.
+                     * 고령 사용자에게 화면 방향이 계속 회전하는 것보다
+                     * 북쪽 고정 지도가 더 안정적이다.
+                     */
+                    setCompassMode(
+                        false
+                    )
 
-                    mapErrorMessage =
-                        "TMAP API Key가 없습니다."
 
-                } else {
+                    setTrackingMode(
+                        false
+                    )
 
-                    tMapView.setSKTMapApiKey(
-                        BuildConfig.TMAP_APP_KEY
+
+                    /*
+                     * 사용자가 필요하면 직접 움직이거나 확대할 수 있다.
+                     */
+                    setUserScrollMoveEnable(
+                        true
+                    )
+
+
+                    setUserScrollZoomEnable(
+                        true
                     )
                 }
+        }
 
 
-                /*
-                 * View lifecycle 시작.
-                 */
-                tMapView.onResume()
+    /*
+     * =====================================================
+     * TMapView Lifecycle
+     * =====================================================
+     *
+     * TMapView는 attach/detach 시 내부에서 onResume/onPause를 호출한다.
+     * Compose에서 수동으로 중복 호출하지 않고, 화면 폐기 시 onDestroy만
+     * 정확히 한 번 호출한다.
+     */
+    DisposableEffect(
+        tMapView
+    ) {
 
+        onDispose {
+
+            mapLoadState =
+                TmapMapLoadState.INITIALIZING
+
+
+            try {
+
+                tMapView.onDestroy()
 
             } catch (
                 error: Throwable
             ) {
 
-                Log.e(
+                Log.w(
                     TAG,
-                    "TMAP 초기화 실패",
+                    "TMapView onDestroy 실패",
                     error
                 )
-
-
-                mapErrorMessage =
-                    "지도를 불러오는 중 오류가 발생했습니다."
-            }
-
-
-            onDispose {
-
-                isMapReady =
-                    false
-
-
-                isRoutePrepared =
-                    false
-
-
-                followCurrentLocation =
-                    false
-
-
-                /*
-                 * Overlay 먼저 제거.
-                 */
-                runCatching {
-
-                    tMapView.removeTMapPolyLine(
-                        ROUTE_LINE_ID
-                    )
-                }
-
-
-                runCatching {
-
-                    tMapView.removeTMapMarkerItem(
-                        HOME_MARKER_ID
-                    )
-                }
-
-
-                runCatching {
-
-                    tMapView.onPause()
-                }
-
-
-                runCatching {
-
-                    tMapView.onDestroy()
-                }
             }
         }
     }
 
 
-    /*
-     * =====================================================
-     * 지도 로딩 Timeout
-     * =====================================================
-     *
-     * SDK가 콜백을 주지 않고 계속 검은 화면에 머무는 경우
-     * 무한 대기하지 않는다.
-     */
     LaunchedEffect(
-        tMapView,
-        isMapReady,
-        mapErrorMessage
+        retryGeneration,
+        mapLoadState
     ) {
 
         if (
-            tMapView == null ||
-            isMapReady ||
-            mapErrorMessage != null
+            mapLoadState !=
+            TmapMapLoadState.INITIALIZING
         ) {
 
             return@LaunchedEffect
@@ -485,80 +334,54 @@ fun TmapRouteMapScreen(
 
 
         if (
-            !isMapReady &&
-            mapErrorMessage == null
+            mapLoadState ==
+            TmapMapLoadState.INITIALIZING
         ) {
 
             Log.e(
                 TAG,
-                "TMAP onMapReady timeout"
+                "TMAP VectorMap 준비 시간 초과"
             )
 
 
-            mapErrorMessage =
-                "지도를 불러오지 못했습니다.\n잠시 후 다시 시도해주세요."
+            mapLoadState =
+                TmapMapLoadState.TIMED_OUT
         }
     }
 
 
     /*
      * =====================================================
-     * 경로선 + 집 마커
+     * 경로선 표시
      * =====================================================
      *
-     * onMapReady 이후에만 실행.
-     * =====================================================
+     * 현재 VectorMap API:
+     *
+     * polyLine.setID(...)
+     * tMapView.addTMapPolyLine(polyLine)
+     *
+     * 예전 Raster SDK처럼
+     *
+     * addTMapPolyLine(id, polyLine)
+     *
+     * 형태로 호출하지 않는다.
      */
-    LaunchedEffect(
+    DisposableEffect(
         isMapReady,
-        routeResult.routePoints,
-        homeLatitude,
-        homeLongitude,
+        routePoints,
         tMapView
     ) {
 
         if (
-            !isMapReady ||
-            tMapView == null
+            !isMapReady
         ) {
 
-            return@LaunchedEffect
-        }
+            onDispose { }
 
+        } else {
 
-        loadingMessage =
-            "경로 불러오는 중..."
-
-
-        try {
-
-            /*
-             * 이전 객체 제거.
-             */
-            runCatching {
-
-                tMapView.removeTMapPolyLine(
-                    ROUTE_LINE_ID
-                )
-            }
-
-
-            runCatching {
-
-                tMapView.removeTMapMarkerItem(
-                    HOME_MARKER_ID
-                )
-            }
-
-
-            /*
-             * ---------------------------------------------
-             * 실제 TMAP 보행 경로선
-             * ---------------------------------------------
-             */
             val validRoutePoints =
-                routeResult
-                    .routePoints
+                routePoints
                     .filter { point ->
 
                         isValidCoordinate(
@@ -570,6 +393,10 @@ fun TmapRouteMapScreen(
                                 point.longitude
                         )
                     }
+
+
+            var routeAdded =
+                false
 
 
             if (
@@ -587,7 +414,7 @@ fun TmapRouteMapScreen(
 
 
                             setLineColor(
-                                android.graphics.Color.rgb(
+                                AndroidColor.rgb(
                                     47,
                                     95,
                                     227
@@ -606,7 +433,7 @@ fun TmapRouteMapScreen(
 
 
                             setOutLineColor(
-                                android.graphics.Color.WHITE
+                                AndroidColor.WHITE
                             )
 
 
@@ -636,318 +463,352 @@ fun TmapRouteMapScreen(
                         }
 
 
+                /*
+                 * VectorMap v3.x:
+                 * ID는 PolyLine 객체 내부에 설정하고
+                 * 객체 하나만 add한다.
+                 */
                 tMapView.addTMapPolyLine(
                     polyLine
                 )
 
 
-                Log.d(
-                    TAG,
-                    "경로선 추가 완료 points=${validRoutePoints.size}"
-                )
-
-            } else {
-
-                Log.w(
-                    TAG,
-                    "경로선 좌표 부족: ${validRoutePoints.size}"
-                )
-            }
-
-
-            /*
-             * ---------------------------------------------
-             * 집 마커
-             * ---------------------------------------------
-             *
-             * 커스텀 Bitmap을 사용하지 않고
-             * SDK 기본 마커를 우선 사용해서
-             * 초기 런타임 안정성을 높인다.
-             */
-            if (
-                homeLatitude != null &&
-                homeLongitude != null &&
-                isValidCoordinate(
-
-                    latitude =
-                        homeLatitude,
-
-                    longitude =
-                        homeLongitude
-                )
-            ) {
-
-                val homeMarker =
-                    TMapMarkerItem()
-                        .apply {
-
-                            setId(
-                                HOME_MARKER_ID
-                            )
-
-
-                            setTMapPoint(
-
-                                TMapPoint(
-
-                                    homeLatitude,
-
-                                    homeLongitude
-                                )
-                            )
-
-
-                            setName(
-                                "집"
-                            )
-
-
-                            setCanShowCallout(
-                                false
-                            )
-
-
-                            setPosition(
-                                0.5f,
-                                1.0f
-                            )
-                        }
-
-
-                tMapView.addTMapMarkerItem(
-                    homeMarker
-                )
+                routeAdded =
+                    true
 
 
                 Log.d(
                     TAG,
-                    "집 마커 추가 완료"
+                    "TMAP 경로선 표시 points=${validRoutePoints.size}"
                 )
             }
 
 
-            isRoutePrepared =
-                true
+            onDispose {
 
+                if (
+                    routeAdded
+                ) {
 
-        } catch (
-            error: Throwable
-        ) {
+                    try {
 
-            Log.e(
-                TAG,
-                "경로/마커 표시 실패",
-                error
-            )
+                        tMapView.removeTMapPolyLine(
+                            ROUTE_LINE_ID
+                        )
 
+                    } catch (
+                        error: Throwable
+                    ) {
 
-            mapErrorMessage =
-                "경로를 지도에 표시하지 못했습니다."
+                        Log.w(
+                            TAG,
+                            "경로선 제거 실패",
+                            error
+                        )
+                    }
+                }
+            }
         }
     }
 
 
     /*
      * =====================================================
-     * 최초 지도 카메라
-     *
-     * 1. 전체 경로
-     * 2. 약 1.7초 유지
-     * 3. 현재 위치 중심
+     * 집 마커
      * =====================================================
+     *
+     * VectorMap v3.x:
+     *
+     * marker.setId(...)
+     * map.addMarkerItem(marker)
      */
-    LaunchedEffect(
+    DisposableEffect(
         isMapReady,
-        isRoutePrepared,
-        routeResult.routePoints,
-        watchLocation,
+        homeLatitude,
+        homeLongitude,
         tMapView
     ) {
 
         if (
             !isMapReady ||
-            !isRoutePrepared ||
-            tMapView == null
+            homeLatitude == null ||
+            homeLongitude == null ||
+            !isValidCoordinate(
+                latitude =
+                    homeLatitude,
+                longitude =
+                    homeLongitude
+            )
         ) {
 
-            return@LaunchedEffect
-        }
+            onDispose { }
+
+        } else {
+
+            val homeMarker =
+                TMapMarkerItem()
+                    .apply {
+
+                        setId(
+                            HOME_MARKER_ID
+                        )
 
 
-        try {
+                        setTMapPoint(
 
-            followCurrentLocation =
-                false
+                            TMapPoint(
+
+                                homeLatitude,
+
+                                homeLongitude
+                            )
+                        )
 
 
-            val validRoutePoints =
-                routeResult
-                    .routePoints
-                    .filter { point ->
+                        setName(
+                            "집"
+                        )
 
-                        isValidCoordinate(
 
-                            latitude =
-                                point.latitude,
+                        setCanShowCallout(
+                            false
+                        )
 
-                            longitude =
-                                point.longitude
+
+                        setPosition(
+                            0.5f,
+                            1.0f
+                        )
+
+
+                        setIcon(
+                            createHomeMarkerBitmap()
                         )
                     }
 
 
-            if (
-                validRoutePoints.size >=
-                2
-            ) {
-
-                val maxLatitude =
-                    validRoutePoints
-                        .maxOf { point ->
-
-                            point.latitude
-                        }
-
-
-                val minLatitude =
-                    validRoutePoints
-                        .minOf { point ->
-
-                            point.latitude
-                        }
-
-
-                val minLongitude =
-                    validRoutePoints
-                        .minOf { point ->
-
-                            point.longitude
-                        }
-
-
-                val maxLongitude =
-                    validRoutePoints
-                        .maxOf { point ->
-
-                            point.longitude
-                        }
-
-
-                tMapView.zoomToTMapPoint(
-
-                    TMapPoint(
-
-                        maxLatitude,
-
-                        minLongitude
-                    ),
-
-                    TMapPoint(
-
-                        minLatitude,
-
-                        maxLongitude
-                    )
-                )
-
-
-                Log.d(
-                    TAG,
-                    "전체 경로 카메라 표시"
-                )
-
-
-                /*
-                 * 여기까지 정상적으로 왔으므로
-                 * 로딩 Overlay 제거.
-                 */
-                loadingMessage =
-                    ""
-
-
-                delay(
-                    WHOLE_ROUTE_HOLD_MILLIS
-                )
-            }
-
-
-            followCurrentLocation =
-                true
-
-
-            val current =
-                watchLocation
-
-
-            if (
-                current != null &&
-                isValidCoordinate(
-
-                    latitude =
-                        current.latitude,
-
-                    longitude =
-                        current.longitude
-                )
-            ) {
-
-                moveToCurrentLocation(
-
-                    tMapView =
-                        tMapView,
-
-                    watchLocation =
-                        current
-                )
-            }
-
-
-        } catch (
-            error: Throwable
-        ) {
-
-            Log.e(
-                TAG,
-                "초기 카메라 설정 실패",
-                error
+            tMapView.addTMapMarkerItem(
+                homeMarker
             )
 
 
-            /*
-             * 카메라 조작 실패만으로 앱이나 지도 자체를
-             * 종료시키지는 않는다.
-             */
-            loadingMessage =
-                ""
+            Log.d(
+                TAG,
+                "집 마커 표시 lat=$homeLatitude lng=$homeLongitude"
+            )
+
+
+            onDispose {
+
+                try {
+
+                    tMapView.removeTMapMarkerItem(
+                        HOME_MARKER_ID
+                    )
+
+                } catch (
+                    error: Throwable
+                ) {
+
+                    Log.w(
+                        TAG,
+                        "집 마커 제거 실패",
+                        error
+                    )
+                }
+            }
         }
     }
 
 
     /*
      * =====================================================
-     * GPS 갱신 → 현재 위치 추적
+     * 처음 전체 경로 표시
      * =====================================================
+     *
+     * VectorMap 공식 API:
+     *
+     * zoomToTMapPoint(
+     *     leftTop,
+     *     rightBottom
+     * )
+     *
+     * leftTop:
+     * 북서쪽
+     *
+     * rightBottom:
+     * 남동쪽
+     *
+     * 전체 경로를 1.7초 보여준 뒤
+     * 현재 위치 중심으로 이동한다.
      */
     LaunchedEffect(
         isMapReady,
-        isRoutePrepared,
-        followCurrentLocation,
-        watchLocation,
+        routePoints,
         tMapView
     ) {
 
         if (
             !isMapReady ||
-            !isRoutePrepared ||
-            !followCurrentLocation ||
-            tMapView == null
+            initialRouteShown
         ) {
 
             return@LaunchedEffect
         }
 
 
-        val current =
+        val validRoutePoints =
+            routePoints
+                .filter { point ->
+
+                    isValidCoordinate(
+
+                        latitude =
+                            point.latitude,
+
+                        longitude =
+                            point.longitude
+                    )
+                }
+
+
+        if (
+            validRoutePoints.size >=
+            2
+        ) {
+
+            val maxLatitude =
+                validRoutePoints
+                    .maxOf {
+
+                        it.latitude
+                    }
+
+
+            val minLatitude =
+                validRoutePoints
+                    .minOf {
+
+                        it.latitude
+                    }
+
+
+            val minLongitude =
+                validRoutePoints
+                    .minOf {
+
+                        it.longitude
+                    }
+
+
+            val maxLongitude =
+                validRoutePoints
+                    .maxOf {
+
+                        it.longitude
+                    }
+
+
+            val leftTop =
+                TMapPoint(
+
+                    maxLatitude,
+
+                    minLongitude
+                )
+
+
+            val rightBottom =
+                TMapPoint(
+
+                    minLatitude,
+
+                    maxLongitude
+                )
+
+
+            tMapView.zoomToTMapPoint(
+
+                leftTop,
+
+                rightBottom
+            )
+
+
+            initialRouteShown =
+                true
+
+
+            Log.d(
+                TAG,
+                "전체 귀가 경로 표시"
+            )
+
+
+            delay(
+                WHOLE_ROUTE_HOLD_MILLIS
+            )
+        } else {
+
+            initialRouteShown =
+                true
+        }
+
+
+        val currentLocation =
+            watchLocation
+                ?: return@LaunchedEffect
+
+
+        if (
+            isValidCoordinate(
+
+                latitude =
+                    currentLocation.latitude,
+
+                longitude =
+                    currentLocation.longitude
+            )
+        ) {
+
+            moveToCurrentLocation(
+
+                tMapView =
+                    tMapView,
+
+                watchLocation =
+                    currentLocation
+            )
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * GPS 변경 → 현재 위치 표시
+     * =====================================================
+     *
+     * 첫 전체경로 화면을 보여주는 동안에는
+     * GPS 업데이트 때문에 즉시 현재 위치로 줌이 돌아가지 않도록
+     * initialRouteShown 이후에만 추적한다.
+     */
+    LaunchedEffect(
+        isMapReady,
+        initialRouteShown,
+        watchLocation,
+        tMapView
+    ) {
+
+        if (
+            !isMapReady ||
+            !initialRouteShown
+        ) {
+
+            return@LaunchedEffect
+        }
+
+
+        val currentLocation =
             watchLocation
                 ?: return@LaunchedEffect
 
@@ -956,10 +817,10 @@ fun TmapRouteMapScreen(
             !isValidCoordinate(
 
                 latitude =
-                    current.latitude,
+                    currentLocation.latitude,
 
                 longitude =
-                    current.longitude
+                    currentLocation.longitude
             )
         ) {
 
@@ -967,31 +828,14 @@ fun TmapRouteMapScreen(
         }
 
 
-        try {
+        moveToCurrentLocation(
 
-            moveToCurrentLocation(
+            tMapView =
+                tMapView,
 
-                tMapView =
-                    tMapView,
-
-                watchLocation =
-                    current
-            )
-
-
-        } catch (
-            error: Throwable
-        ) {
-
-            /*
-             * GPS 한 번 갱신 실패했다고 앱을 종료시키지 않는다.
-             */
-            Log.e(
-                TAG,
-                "GPS 지도 갱신 실패",
-                error
-            )
-        }
+            watchLocation =
+                currentLocation
+        )
     }
 
 
@@ -1010,11 +854,8 @@ fun TmapRouteMapScreen(
                 )
     ) {
 
-        /*
-         * TMapView가 정상 생성됐을 때만 AndroidView 표시.
-         */
-        if (
-            tMapView != null
+        key(
+            retryGeneration
         ) {
 
             AndroidView(
@@ -1022,6 +863,50 @@ fun TmapRouteMapScreen(
                 factory = {
 
                     tMapView
+                        .also { mapView ->
+
+                            /*
+                             * View.post는 AndroidView가 Window에 attach된 뒤
+                             * 실행된다. 리스너가 모두 등록된 상태에서 인증과
+                             * 엔진 초기화를 시작해 초기 MapReady 누락을 막는다.
+                             */
+                            mapView.post {
+
+                                val apiKey =
+                                    BuildConfig.TMAP_APP_KEY
+
+
+                                if (
+                                    apiKey.isBlank()
+                                ) {
+
+                                    Log.e(
+                                        TAG,
+                                        "TMAP_APP_KEY가 비어 있음"
+                                    )
+
+
+                                    mapFailureDetail =
+                                        "앱 키가 설정되지 않았습니다."
+
+
+                                    mapLoadState =
+                                        TmapMapLoadState.API_KEY_FAILED
+
+                                } else {
+
+                                    Log.d(
+                                        TAG,
+                                        "TMAP 초기화 시작 keyPresent=true keyLength=${apiKey.length}"
+                                    )
+
+
+                                    mapView.setSKTMapApiKey(
+                                        apiKey
+                                    )
+                                }
+                            }
+                        }
                 },
 
                 modifier =
@@ -1030,400 +915,180 @@ fun TmapRouteMapScreen(
         }
 
 
-        /*
-         * =================================================
-         * 보호자 앱 느낌의 지도 Loading Overlay
-         * =================================================
-         */
         if (
-            mapErrorMessage == null &&
-            (
-                    !isMapReady ||
-                            !isRoutePrepared ||
-                            loadingMessage.isNotBlank()
-                    )
+            mapLoadState !=
+            TmapMapLoadState.READY
         ) {
 
-            MapLoadingOverlay(
+            TmapMapLoadingOverlay(
+                state =
+                    mapLoadState,
 
-                message =
-                    loadingMessage
-                        .ifBlank {
+                failureDetail =
+                    mapFailureDetail,
 
-                            "지도 불러오는 중..."
-                        }
-            )
-        }
+                onRetry = {
 
-
-        /*
-         * =================================================
-         * 지도 오류
-         * =================================================
-         *
-         * 앱이 죽지 않고 이 화면에 남는다.
-         */
-        val errorMessage =
-            mapErrorMessage
+                    mapFailureDetail =
+                        null
 
 
-        if (
-            errorMessage != null
-        ) {
-
-            MapErrorOverlay(
-
-                message =
-                    errorMessage,
-
-                onClose =
-                    onClose
-            )
-        }
+                    mapLoadState =
+                        TmapMapLoadState.INITIALIZING
 
 
-        /*
-         * 정상 지도 화면에서만 버튼 표시
-         */
-        if (
-            mapErrorMessage == null &&
-            isMapReady
-        ) {
-
-            /*
-             * 지도 닫기
-             */
-            RoundTmapMapButton(
-
-                modifier =
-                    Modifier
-                        .align(
-                            Alignment.BottomCenter
-                        )
-                        .padding(
-                            bottom =
-                                8.dp
-                        ),
-
-                type =
-                    MapButtonType.CLOSE,
-
-                contentDescription =
-                    "지도 닫기",
-
-                onClick =
-                    onClose
-            )
-
-
-            /*
-             * 현재 위치 복귀
-             */
-            RoundTmapMapButton(
-
-                modifier =
-                    Modifier
-                        .align(
-                            Alignment.BottomEnd
-                        )
-                        .padding(
-                            end =
-                                10.dp,
-
-                            bottom =
-                                10.dp
-                        ),
-
-                type =
-                    MapButtonType.MY_LOCATION,
-
-                contentDescription =
-                    "현재 위치",
-
-                onClick = {
-
-                    val current =
-                        watchLocation
-
-
-                    if (
-                        current != null &&
-                        tMapView != null &&
-                        isValidCoordinate(
-
-                            latitude =
-                                current.latitude,
-
-                            longitude =
-                                current.longitude
-                        )
-                    ) {
-
-                        try {
-
-                            followCurrentLocation =
-                                true
-
-
-                            moveToCurrentLocation(
-
-                                tMapView =
-                                    tMapView,
-
-                                watchLocation =
-                                    current
-                            )
-
-
-                        } catch (
-                            error: Throwable
-                        ) {
-
-                            Log.e(
-                                TAG,
-                                "현재 위치 버튼 실패",
-                                error
-                            )
-                        }
-                    }
+                    retryGeneration +=
+                        1
                 }
             )
-        }
-    }
-}
 
-
-/*
- * =========================================================
- * Loading Overlay
- * =========================================================
- */
-@Composable
-private fun MapLoadingOverlay(
-
-    message: String
-
-) {
-
-    Box(
-
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Color(
-                        0xE6000000
-                    )
-                ),
-
-        contentAlignment =
-            Alignment.Center
-    ) {
-
-        Column(
-
-            horizontalAlignment =
-                Alignment.CenterHorizontally
+        } else if (
+            routeResult == null
         ) {
 
-            CircularProgressIndicator(
-
-                modifier =
-                    Modifier.size(
-                        32.dp
-                    ),
-
-                indicatorColor =
-                    Color(
-                        0xFF4CAF50
-                    ),
-
-                trackColor =
-                    Color(
-                        0xFF333333
-                    )
-            )
-
-
-            Spacer(
-
-                modifier =
-                    Modifier.height(
-                        10.dp
-                    )
-            )
-
-
             BasicText(
-
                 text =
-                    message,
-
-                style =
-                    TextStyle(
-
-                        color =
-                            Color.White,
-
-                        fontSize =
-                            13.sp,
-
-                        fontWeight =
-                            FontWeight.Bold,
-
-                        textAlign =
-                            TextAlign.Center
-                    )
-            )
-        }
-    }
-}
-
-
-/*
- * =========================================================
- * Error Overlay
- * =========================================================
- */
-@Composable
-private fun MapErrorOverlay(
-
-    message: String,
-
-    onClose: () -> Unit
-
-) {
-
-    Box(
-
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Color.Black
-                ),
-
-        contentAlignment =
-            Alignment.Center
-    ) {
-
-        Column(
-
-            modifier =
-                Modifier.padding(
-                    20.dp
-                ),
-
-            horizontalAlignment =
-                Alignment.CenterHorizontally
-        ) {
-
-            Icon(
-
-                imageVector =
-                    Icons.Default.Home,
-
-                contentDescription =
-                    null,
-
-                tint =
-                    Color(
-                        0xFFFFC107
-                    ),
-
-                modifier =
-                    Modifier.size(
-                        32.dp
-                    )
-            )
-
-
-            Spacer(
-
-                modifier =
-                    Modifier.height(
-                        8.dp
-                    )
-            )
-
-
-            BasicText(
-
-                text =
-                    message,
-
-                style =
-                    TextStyle(
-
-                        color =
-                            Color.White,
-
-                        fontSize =
-                            12.sp,
-
-                        fontWeight =
-                            FontWeight.Bold,
-
-                        textAlign =
-                            TextAlign.Center
-                    )
-            )
-
-
-            Spacer(
-
-                modifier =
-                    Modifier.height(
-                        12.dp
-                    )
-            )
-
-
-            Box(
+                    "경로 계산 중...",
 
                 modifier =
                     Modifier
-                        .size(
-                            42.dp
+                        .align(
+                            Alignment.TopCenter
                         )
-                        .clip(
-                            CircleShape
+                        .padding(
+                            top =
+                                12.dp
                         )
                         .background(
                             Color(
-                                0xFF333333
-                            )
+                                0xCC111111
+                            ),
+                            CircleShape
                         )
-                        .clickable(
-                            onClick =
-                                onClose
+                        .padding(
+                            horizontal =
+                                12.dp,
+                            vertical =
+                                6.dp
                         ),
 
-                contentAlignment =
-                    Alignment.Center
-            ) {
-
-                Icon(
-
-                    imageVector =
-                        Icons.Default.Close,
-
-                    contentDescription =
-                        "닫기",
-
-                    tint =
-                        Color.White
-                )
-            }
+                style =
+                    TextStyle(
+                        color =
+                            Color.White,
+                        fontSize =
+                            11.sp,
+                        textAlign =
+                            TextAlign.Center
+                    )
+            )
         }
+
+
+        /*
+         * 지도 닫기
+         */
+        RoundTmapMapButton(
+
+            modifier =
+                Modifier
+                    .align(
+                        Alignment.BottomCenter
+                    )
+                    .padding(
+                        bottom =
+                            8.dp
+                    ),
+
+            type =
+                MapButtonType.CLOSE,
+
+            contentDescription =
+                "지도 닫기",
+
+            onClick =
+                onClose
+        )
+
+
+        /*
+         * 사용자가 지도를 직접 움직인 후
+         * 현재 위치로 돌아오기
+         */
+        RoundTmapMapButton(
+
+            modifier =
+                Modifier
+                    .align(
+                        Alignment.BottomEnd
+                    )
+                    .padding(
+                        end =
+                            10.dp,
+
+                        bottom =
+                            10.dp
+                    ),
+
+            type =
+                MapButtonType.MY_LOCATION,
+
+            contentDescription =
+                "현재 위치",
+
+            onClick = {
+
+                val currentLocation =
+                    watchLocation
+
+
+                if (
+                    isMapReady &&
+                    currentLocation != null &&
+                    isValidCoordinate(
+
+                        latitude =
+                            currentLocation.latitude,
+
+                        longitude =
+                            currentLocation.longitude
+                    )
+                ) {
+
+                    moveToCurrentLocation(
+
+                        tMapView =
+                            tMapView,
+
+                        watchLocation =
+                            currentLocation
+                    )
+                }
+            }
+        )
     }
 }
 
 
 /*
  * =========================================================
- * 현재 위치 이동
+ * 현재 위치로 지도 이동
  * =========================================================
+ *
+ * VectorMap v3.x 공식 좌표 순서:
+ *
+ * setLocationPoint(
+ *     latitude,
+ *     longitude
+ * )
+ *
+ * setCenterPoint(
+ *     latitude,
+ *     longitude
+ * )
+ *
+ * 예전 Raster SDK의 longitude → latitude 순서와 다르므로
+ * 절대 바꾸면 안 된다.
  */
 private fun moveToCurrentLocation(
 
@@ -1433,10 +1098,6 @@ private fun moveToCurrentLocation(
 
 ) {
 
-    /*
-     * v3.7:
-     * latitude, longitude 순서.
-     */
     tMapView.setLocationPoint(
 
         watchLocation.latitude,
@@ -1450,6 +1111,9 @@ private fun moveToCurrentLocation(
     )
 
 
+    /*
+     * 워치에서 주변 1~2블록 정도가 보이도록 설정.
+     */
     tMapView.setZoomLevel(
         FOLLOW_ZOOM_LEVEL
     )
@@ -1459,16 +1123,191 @@ private fun moveToCurrentLocation(
 
         watchLocation.latitude,
 
-        watchLocation.longitude,
-
-        true
+        watchLocation.longitude
     )
+
+
+    Log.v(
+        TAG,
+        "지도 현재 위치 이동 " +
+                "lat=${watchLocation.latitude} " +
+                "lng=${watchLocation.longitude}"
+    )
+}
+
+
+private enum class TmapMapLoadState {
+
+    INITIALIZING,
+
+    READY,
+
+    API_KEY_FAILED,
+
+    TIMED_OUT
+}
+
+
+@Composable
+private fun TmapMapLoadingOverlay(
+
+    state: TmapMapLoadState,
+
+    failureDetail: String?,
+
+    onRetry: () -> Unit
+
+) {
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(
+                        0xCC000000
+                    )
+                ),
+        contentAlignment =
+            Alignment.Center
+    ) {
+
+        Column(
+            horizontalAlignment =
+                Alignment.CenterHorizontally
+        ) {
+
+            BasicText(
+                text =
+                    when (
+                        state
+                    ) {
+
+                        TmapMapLoadState.INITIALIZING ->
+                            "지도 불러오는 중..."
+
+                        TmapMapLoadState.API_KEY_FAILED ->
+                            "지도 인증 실패"
+
+                        TmapMapLoadState.TIMED_OUT ->
+                            "지도 연결 실패"
+
+                        TmapMapLoadState.READY ->
+                            ""
+                    },
+                style =
+                    TextStyle(
+                        color =
+                            Color.White,
+                        fontSize =
+                            13.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                        textAlign =
+                            TextAlign.Center
+                    )
+            )
+
+
+            if (
+                state ==
+                TmapMapLoadState.API_KEY_FAILED &&
+                !failureDetail.isNullOrBlank()
+            ) {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            4.dp
+                        )
+                )
+
+
+                BasicText(
+                    text =
+                        failureDetail.take(
+                            60
+                        ),
+                    style =
+                        TextStyle(
+                            color =
+                                Color(
+                                    0xFFFFB4AB
+                                ),
+                            fontSize =
+                                9.sp,
+                            textAlign =
+                                TextAlign.Center
+                        )
+                )
+            }
+
+
+            if (
+                state ==
+                TmapMapLoadState.API_KEY_FAILED ||
+                state ==
+                TmapMapLoadState.TIMED_OUT
+            ) {
+
+                Spacer(
+                    modifier =
+                        Modifier.height(
+                            8.dp
+                        )
+                )
+
+
+                Box(
+                    modifier =
+                        Modifier
+                            .clip(
+                                CircleShape
+                            )
+                            .background(
+                                Color(
+                                    0xFF2F5FE3
+                                )
+                            )
+                            .clickable(
+                                onClick =
+                                    onRetry
+                            )
+                            .padding(
+                                horizontal =
+                                    14.dp,
+                                vertical =
+                                    7.dp
+                            ),
+                    contentAlignment =
+                        Alignment.Center
+                ) {
+
+                    BasicText(
+                        text =
+                            "다시 시도",
+                        style =
+                            TextStyle(
+                                color =
+                                    Color.White,
+                                fontSize =
+                                    11.sp,
+                                fontWeight =
+                                    FontWeight.Bold,
+                                textAlign =
+                                    TextAlign.Center
+                            )
+                    )
+                }
+            }
+        }
+    }
 }
 
 
 /*
  * =========================================================
- * Round Buttons
+ * 동그란 지도 버튼
  * =========================================================
  */
 private enum class MapButtonType {
@@ -1497,7 +1336,7 @@ private fun RoundTmapMapButton(
         modifier =
             modifier
                 .size(
-                    42.dp
+                    MAP_BUTTON_SIZE_DP.dp
                 )
                 .clip(
                     CircleShape
@@ -1548,7 +1387,115 @@ private fun RoundTmapMapButton(
 
 /*
  * =========================================================
- * 좌표 검증
+ * 집 마커 Bitmap
+ * =========================================================
+ */
+private fun createHomeMarkerBitmap(): Bitmap {
+
+    val size =
+        HOME_MARKER_SIZE_PX
+
+
+    val bitmap =
+        Bitmap.createBitmap(
+
+            size,
+
+            size,
+
+            Bitmap.Config.ARGB_8888
+        )
+
+
+    val canvas =
+        Canvas(
+            bitmap
+        )
+
+
+    val circlePaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        )
+            .apply {
+
+                color =
+                    AndroidColor.rgb(
+                        46,
+                        160,
+                        67
+                    )
+            }
+
+
+    canvas.drawCircle(
+
+        size /
+                2f,
+
+        size /
+                2f,
+
+        size *
+                0.43f,
+
+        circlePaint
+    )
+
+
+    val textPaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        )
+            .apply {
+
+                color =
+                    AndroidColor.WHITE
+
+
+                textSize =
+                    28f
+
+
+                typeface =
+                    Typeface.DEFAULT_BOLD
+
+
+                textAlign =
+                    Paint.Align.CENTER
+            }
+
+
+    val textY =
+        size /
+                2f -
+                (
+                        textPaint.ascent() +
+                                textPaint.descent()
+                        ) /
+                2f
+
+
+    canvas.drawText(
+
+        "집",
+
+        size /
+                2f,
+
+        textY,
+
+        textPaint
+    )
+
+
+    return bitmap
+}
+
+
+/*
+ * =========================================================
+ * GPS 좌표 검증
  * =========================================================
  */
 private fun isValidCoordinate(
@@ -1583,32 +1530,25 @@ private const val TAG =
 
 
 /*
- * 주변 약 1~2블록.
+ * TMAP VectorMap:
+ * 워치 화면에서 주변 1~2블록 정도.
+ *
+ * 너무 확대되면 16,
+ * 조금 더 가까이 보고 싶으면 18.
  */
 private const val FOLLOW_ZOOM_LEVEL =
     17
 
 
 /*
- * 전체 경로를 먼저 보여주는 시간.
+ * 처음 전체 경로를 보여주는 시간.
  */
 private const val WHOLE_ROUTE_HOLD_MILLIS =
     1_700L
 
 
-/*
- * 지도 준비 최대 대기시간.
- */
 private const val MAP_READY_TIMEOUT_MILLIS =
-    12_000L
-
-
-/*
- * Wear OS에서 충분한 지도 FPS.
- * v3.7부터 제공.
- */
-private const val MAP_FPS =
-    30
+    10_000L
 
 
 private const val ROUTE_LINE_ID =
@@ -1625,3 +1565,11 @@ private const val ROUTE_LINE_WIDTH =
 
 private const val ROUTE_OUTLINE_WIDTH =
     2f
+
+
+private const val HOME_MARKER_SIZE_PX =
+    72
+
+
+private const val MAP_BUTTON_SIZE_DP =
+    42

@@ -212,22 +212,9 @@ dependencies {
      * =====================================================
      */
     implementation(
-
-        fileTree(
-
-            mapOf(
-
-                "dir" to
-                        "libs",
-
-                "include" to
-                        listOf(
-
-                            "*.jar",
-
-                            "*.aar"
-                        )
-            )
+        files(
+            "libs/tmap-sdk-3.7.aar",
+            "libs/vsm-tmap-sdk-v2-eaa-2.0.14.aar"
         )
     )
 

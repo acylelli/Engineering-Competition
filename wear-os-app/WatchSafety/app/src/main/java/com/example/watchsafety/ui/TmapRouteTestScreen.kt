@@ -1191,41 +1191,32 @@ fun TmapRouteTestScreen(
         showMap
     ) {
 
-        val route =
-            routeResult
+        TmapRouteMapScreen(
+
+            routeResult =
+                routeResult,
+
+            watchLocation =
+                watchLocation,
+
+            homeLatitude =
+                homeLatitude,
+
+            homeLongitude =
+                homeLongitude,
+
+            headingDegrees =
+                headingDegrees,
+
+            onClose = {
+
+                showMap =
+                    false
+            }
+        )
 
 
-        if (
-            route != null
-        ) {
-
-            TmapRouteMapScreen(
-
-                routeResult =
-                    route,
-
-                watchLocation =
-                    watchLocation,
-
-                homeLatitude =
-                    homeLatitude,
-
-                homeLongitude =
-                    homeLongitude,
-
-                headingDegrees =
-                    headingDegrees,
-
-                onClose = {
-
-                    showMap =
-                        false
-                }
-            )
-
-
-            return
-        }
+        return
     }
 
 
@@ -1284,6 +1275,52 @@ fun TmapRouteTestScreen(
                             TextAlign.Center
                     )
             )
+
+
+            Spacer(
+                modifier =
+                    Modifier.height(
+                        8.dp
+                    )
+            )
+
+
+            Box(
+                modifier =
+                    Modifier
+                        .size(
+                            46.dp
+                        )
+                        .clip(
+                            CircleShape
+                        )
+                        .background(
+                            Color(
+                                0xFF2F5FE3
+                            )
+                        )
+                        .clickable {
+
+                            showMap =
+                                true
+                        },
+                contentAlignment =
+                    Alignment.Center
+            ) {
+
+                Icon(
+                    imageVector =
+                        Icons.Default.Map,
+                    contentDescription =
+                        "지도 보기",
+                    tint =
+                        Color.White,
+                    modifier =
+                        Modifier.size(
+                            23.dp
+                        )
+                )
+            }
 
         } else {
 
