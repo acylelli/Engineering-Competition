@@ -507,6 +507,67 @@ class SupabaseGuardianRepository(
 
     /*
      * =====================================================
+     * 워치가 SOS 시 직접 전화할 보호자 번호
+     * =====================================================
+     */
+
+    override suspend fun updateEmergencyPhoneNumber(
+        phoneNumber: String,
+    ) {
+
+        val normalizedPhoneNumber =
+            phoneNumber
+                .trim()
+                .filterIndexed { index, character ->
+                    character.isDigit() ||
+                            (character == '+' && index == 0)
+                }
+
+        require(
+            normalizedPhoneNumber.matches(
+                Regex("^\\+?[0-9]{8,15}$")
+            )
+        ) {
+            "전화번호를 정확히 입력해주세요."
+        }
+
+        supabase
+            .from(
+                "guardian_profiles"
+            )
+            .update(
+                {
+                    set(
+                        "emergency_phone_number",
+                        normalizedPhoneNumber
+                    )
+                    set(
+                        "updated_at",
+                        OffsetDateTime
+                            .now()
+                            .toString()
+                    )
+                },
+            ) {
+                filter {
+                    eq(
+                        "guardian_id",
+                        requireGuardianId()
+                    )
+                }
+            }
+
+        Log.d(
+            TAG,
+            "긴급 연락처 변경 완료"
+        )
+
+        loadSnapshot()
+    }
+
+
+    /*
+     * =====================================================
      * 알림 설정
      * =====================================================
      */
@@ -852,6 +913,10 @@ class SupabaseGuardianRepository(
                                 profile.displayName,
                             guardianRelationship =
                                 profile.relationship,
+                            emergencyPhoneNumber =
+                                profile
+                                    .emergencyPhoneNumber
+                                    .orEmpty(),
                         ),
                     watchStatus =
                         WatchStatus(

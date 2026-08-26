@@ -67,6 +67,11 @@ interface GuardianRepository {
     )
 
 
+    suspend fun updateEmergencyPhoneNumber(
+        phoneNumber: String,
+    )
+
+
     suspend fun updateNotificationSettings(
         settings: NotificationSettings,
     )

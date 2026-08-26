@@ -68,6 +68,8 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 
 import com.example.watchsafety.data.HomeSafeZoneManager
+import com.example.watchsafety.data.EmergencyCallManager
+import com.example.watchsafety.data.EmergencyCallStatus
 import com.example.watchsafety.data.ReturnHomeRequestStore
 import com.example.watchsafety.data.ReturnHomeRealtimeManager
 import com.example.watchsafety.data.WatchFcmTokenManager
@@ -187,6 +189,19 @@ class MainActivity :
      */
     private lateinit var watchSafetyEventManager:
             WatchSafetyEventManager
+
+
+    /*
+     * SOS / 낙상 시 LTE 보호자 직접 통화
+     */
+    private lateinit var emergencyCallManager:
+            EmergencyCallManager
+
+
+    private val emergencyCallStatusState =
+        mutableStateOf(
+            EmergencyCallStatus.IDLE
+        )
 
 
     /*
@@ -472,6 +487,12 @@ class MainActivity :
             WatchSafetyEventManager()
 
 
+        emergencyCallManager =
+            EmergencyCallManager(
+                applicationContext
+            )
+
+
         pairingManager =
             PairingManager()
 
@@ -657,6 +678,30 @@ class MainActivity :
                 ) { permissions ->
 
 
+                    val callPhoneGranted =
+                        permissions[
+                            Manifest.permission
+                                .CALL_PHONE
+                        ] == true ||
+                                emergencyCallManager
+                                    .hasCallPermission()
+
+
+                    if (
+                        emergencyCallStatusState.value ==
+                        EmergencyCallStatus.PERMISSION_REQUIRED
+                    ) {
+                        if (
+                            callPhoneGranted
+                        ) {
+                            startEmergencyCall()
+                        } else {
+                            emergencyCallStatusState.value =
+                                EmergencyCallStatus.PERMISSION_DENIED
+                        }
+                    }
+
+
                     val fineLocationGranted =
                         permissions[
                             Manifest.permission
@@ -733,7 +778,8 @@ class MainActivity :
                                 "location=$fineLocationGranted, " +
                                 "bodySensors=$bodySensorsGranted, " +
                                 "activityRecognition=$activityRecognitionGranted, " +
-                                "notification=$notificationGranted"
+                                "notification=$notificationGranted, " +
+                                "callPhone=$callPhoneGranted"
                     )
 
 
@@ -879,7 +925,10 @@ class MainActivity :
                                 .ACTIVITY_RECOGNITION,
 
                             Manifest.permission
-                                .POST_NOTIFICATIONS
+                                .POST_NOTIFICATIONS,
+
+                            Manifest.permission
+                                .CALL_PHONE
                         )
                     )
             }
@@ -991,9 +1040,58 @@ class MainActivity :
 
 
                     watchSafetyEventManager =
-                        watchSafetyEventManager
+                        watchSafetyEventManager,
+
+
+                    emergencyCallStatus =
+                        emergencyCallStatusState.value,
+
+
+                    onEmergencyCallRequest = {
+                        if (
+                            emergencyCallManager
+                                .hasCallPermission()
+                        ) {
+                            startEmergencyCall()
+                        } else {
+                            emergencyCallStatusState.value =
+                                EmergencyCallStatus.PERMISSION_REQUIRED
+
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission
+                                        .CALL_PHONE
+                                )
+                            )
+                        }
+                    },
                 )
             }
+        }
+    }
+
+
+    /*
+     * =====================================================
+     * 보호자 직접 통화
+     * =====================================================
+     */
+
+    private fun startEmergencyCall() {
+        if (
+            emergencyCallStatusState.value ==
+            EmergencyCallStatus.CONNECTING
+        ) {
+            return
+        }
+
+        emergencyCallStatusState.value =
+            EmergencyCallStatus.CONNECTING
+
+        lifecycleScope.launch {
+            emergencyCallStatusState.value =
+                emergencyCallManager
+                    .placePrimaryGuardianCall()
         }
     }
 
@@ -1068,6 +1166,18 @@ class MainActivity :
 
                 wearerIdState.value =
                     wearerId
+
+
+                runCatching {
+                    emergencyCallManager
+                        .refreshContact()
+                }.onFailure { error ->
+                    Log.w(
+                        "EmergencyCall",
+                        "긴급 연락처 사전 동기화 실패: ${error.message}",
+                        error,
+                    )
+                }
 
 
                 Log.d(
@@ -1894,7 +2004,15 @@ fun EmergencyManager(
 
 
     watchSafetyEventManager:
-    WatchSafetyEventManager
+    WatchSafetyEventManager,
+
+
+    emergencyCallStatus:
+    EmergencyCallStatus,
+
+
+    onEmergencyCallRequest:
+        () -> Unit,
 
 ) {
 
@@ -2171,6 +2289,9 @@ fun EmergencyManager(
                     onScreenChange(
                         AppScreen.SOS_SENT
                     )
+
+
+                    onEmergencyCallRequest()
 
 
                     eventScope.launch {
@@ -2558,6 +2679,9 @@ fun EmergencyManager(
                     )
 
 
+                    onEmergencyCallRequest()
+
+
                     eventScope.launch {
 
 
@@ -2611,6 +2735,9 @@ fun EmergencyManager(
                     onScreenChange(
                         AppScreen.SOS_SENT
                     )
+
+
+                    onEmergencyCallRequest()
 
 
                     eventScope.launch {
@@ -2668,6 +2795,9 @@ fun EmergencyManager(
         AppScreen.SOS_SENT -> {
 
             SosSentScreen(
+
+                callStatus =
+                    emergencyCallStatus,
 
                 onReturnHome = {
 
@@ -3608,6 +3738,10 @@ fun FallDetectScreen(
 @Composable
 fun SosSentScreen(
 
+    callStatus:
+    EmergencyCallStatus =
+        EmergencyCallStatus.IDLE,
+
     onReturnHome:
         () -> Unit
 
@@ -3678,6 +3812,55 @@ fun SosSentScreen(
 
             textAlign =
                 TextAlign.Center
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(
+                    4.dp
+                )
+        )
+
+
+        Text(
+            text =
+                when (
+                    callStatus
+                ) {
+                    EmergencyCallStatus.IDLE ->
+                        "보호자 통화를 준비합니다."
+
+                    EmergencyCallStatus.CONNECTING ->
+                        "보호자에게 연결 중..."
+
+                    EmergencyCallStatus.CALL_STARTED ->
+                        "보호자에게 전화를 걸었습니다."
+
+                    EmergencyCallStatus.CONTACT_NOT_CONFIGURED ->
+                        "연락처가 없어 알림만 전송했습니다."
+
+                    EmergencyCallStatus.PERMISSION_REQUIRED ->
+                        "전화 권한을 확인하고 있습니다."
+
+                    EmergencyCallStatus.PERMISSION_DENIED ->
+                        "전화 권한이 없어 알림만 전송했습니다."
+
+                    EmergencyCallStatus.CALLING_UNAVAILABLE ->
+                        "통화할 수 없어 알림만 전송했습니다."
+
+                    EmergencyCallStatus.FAILED ->
+                        "통화 연결 실패, 알림은 전송했습니다."
+                },
+            color =
+                Color.White.copy(
+                    alpha =
+                        0.9f
+                ),
+            fontSize =
+                11.sp,
+            textAlign =
+                TextAlign.Center,
         )
 
 

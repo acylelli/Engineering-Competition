@@ -99,6 +99,12 @@ private fun FallDetectedPreview() {
 @Composable
 private fun SosSentPreview() {
     WatchSafetyTheme {
-        SosSentScreen(onReturnHome = {})
+        SosSentScreen(
+            callStatus =
+                com.example.watchsafety.data
+                    .EmergencyCallStatus
+                    .CALL_STARTED,
+            onReturnHome = {},
+        )
     }
 }

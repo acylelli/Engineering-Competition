@@ -330,6 +330,18 @@ class GuardianViewModel(
     }
 
 
+    fun updateEmergencyPhoneNumber(
+        phoneNumber: String,
+    ) {
+        launchRepositoryAction {
+            repository
+                .updateEmergencyPhoneNumber(
+                    phoneNumber
+                )
+        }
+    }
+
+
     /*
      * =====================================================
      * 알림 설정
