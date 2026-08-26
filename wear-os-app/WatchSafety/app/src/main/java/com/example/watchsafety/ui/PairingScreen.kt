@@ -59,8 +59,12 @@ private val PairingError =
 
 @Composable
 fun PairingScreen(
-    pairingManager: PairingManager,
-    onConnected: () -> Unit
+    pairingManager: PairingManager?,
+    onConnected: () -> Unit,
+    previewPairingCode: String? = null,
+    previewRemainingSeconds: Int? = null,
+    previewErrorMessage: String? = null,
+    previewLoading: Boolean = false
 ) {
 
     val listState =
@@ -68,7 +72,7 @@ fun PairingScreen(
 
     var pairingCode by
     remember {
-        mutableStateOf<String?>(null)
+        mutableStateOf(previewPairingCode)
     }
 
     var expiresAt by
@@ -78,17 +82,25 @@ fun PairingScreen(
 
     var remainingSeconds by
     remember {
-        mutableIntStateOf(0)
+        mutableIntStateOf(
+            previewRemainingSeconds ?: 0
+        )
     }
 
     var loading by
     remember {
-        mutableStateOf(true)
+        mutableStateOf(
+            if (pairingManager == null) {
+                previewLoading
+            } else {
+                true
+            }
+        )
     }
 
     var errorMessage by
     remember {
-        mutableStateOf<String?>(null)
+        mutableStateOf(previewErrorMessage)
     }
 
     var requestVersion by
@@ -104,6 +116,10 @@ fun PairingScreen(
      */
     LaunchedEffect(requestVersion) {
 
+        val manager =
+            pairingManager
+                ?: return@LaunchedEffect
+
         loading = true
         errorMessage = null
 
@@ -114,7 +130,7 @@ fun PairingScreen(
              * 새 코드 만들 필요 없음.
              */
             if (
-                pairingManager.isPaired()
+                manager.isPaired()
             ) {
 
                 onConnected()
@@ -123,7 +139,7 @@ fun PairingScreen(
             }
 
             val result =
-                pairingManager
+                manager
                     .createPairingCode()
 
             pairingCode =
@@ -155,6 +171,10 @@ fun PairingScreen(
      * ---------------------------------------------------------
      */
     LaunchedEffect(expiresAt) {
+
+        if (pairingManager == null) {
+            return@LaunchedEffect
+        }
 
         val expiry =
             expiresAt
@@ -198,6 +218,10 @@ fun PairingScreen(
      */
     LaunchedEffect(pairingCode) {
 
+        val manager =
+            pairingManager
+                ?: return@LaunchedEffect
+
         if (
             pairingCode == null
         ) {
@@ -211,7 +235,7 @@ fun PairingScreen(
             try {
 
                 if (
-                    pairingManager.isPaired()
+                    manager.isPaired()
                 ) {
 
                     onConnected()

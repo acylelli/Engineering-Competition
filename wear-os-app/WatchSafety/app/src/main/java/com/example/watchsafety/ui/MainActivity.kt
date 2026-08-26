@@ -1985,6 +1985,76 @@ fun EmergencyManager(
 
 
     /*
+     * WatchLocationManager가 주기적으로 전달하는 최신 GPS를
+     * 안전구역 판정에도 사용한다.
+     * 첫 지속 위치가 오기 전에는 기존 1회 위치를 fallback으로 사용한다.
+     */
+    val currentSafeZoneLocation =
+        remember(
+            watchLocation,
+            myLocation
+        ) {
+
+            watchLocation
+                ?.let { current ->
+
+                    Location(
+                        "watch_continuous_gps"
+                    ).apply {
+
+                        latitude =
+                            current.latitude
+
+                        longitude =
+                            current.longitude
+
+                        accuracy =
+                            current.accuracyMeters
+                    }
+                }
+                ?: myLocation
+        }
+
+
+    val safeZoneStatus =
+        remember(
+            currentSafeZoneLocation,
+            homeLocation,
+            homeRadiusMeters
+        ) {
+
+            val currentLocation =
+                currentSafeZoneLocation
+
+            val currentHome =
+                homeLocation
+
+            val radius =
+                homeRadiusMeters
+
+            if (
+                currentLocation == null ||
+                currentHome == null ||
+                radius == null
+            ) {
+
+                SafeZoneStatus.CHECKING
+
+            } else if (
+                currentLocation.distanceTo(currentHome) <=
+                radius.toFloat()
+            ) {
+
+                SafeZoneStatus.SAFE
+
+            } else {
+
+                SafeZoneStatus.OUTSIDE
+            }
+        }
+
+
+    /*
      * =====================================================
      * 안전구역 감시
      * =====================================================
@@ -2000,13 +2070,13 @@ fun EmergencyManager(
 
 
     LaunchedEffect(
-        myLocation,
+        currentSafeZoneLocation,
         homeLocation,
         homeRadiusMeters
     ) {
 
         val currentLocation =
-            myLocation
+            currentSafeZoneLocation
                 ?: return@LaunchedEffect
 
 
@@ -2075,6 +2145,10 @@ fun EmergencyManager(
 
                 guardianConnected =
                     guardianConnected,
+
+
+                safeZoneStatus =
+                    safeZoneStatus,
 
 
                 onGoHomeClick = {

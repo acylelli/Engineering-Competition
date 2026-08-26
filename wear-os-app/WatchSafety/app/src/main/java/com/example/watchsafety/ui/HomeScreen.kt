@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -65,16 +66,34 @@ private val HomeBlue = Color(0xFF5575E7)
 
 private val HomeSecondaryText = Color(0xFF9B9BA1)
 
+enum class SafeZoneStatus {
+    CHECKING,
+    SAFE,
+    OUTSIDE
+}
+
 
 @Composable
 fun HomeScreen(
     guardianConnected: Boolean,
+    safeZoneStatus: SafeZoneStatus,
     onGoHomeClick: () -> Unit,
     onSosClick: () -> Unit,
-    onGuardianConnectClick: () -> Unit
+    onGuardianConnectClick: () -> Unit,
+    previewBatteryLevel: Int? = null
 ) {
 
-    val batteryLevel by rememberBatteryLevel()
+    val liveBatteryLevel =
+        if (previewBatteryLevel == null) {
+            rememberBatteryLevel()
+        } else {
+            null
+        }
+
+    val batteryLevel =
+        previewBatteryLevel
+            ?: liveBatteryLevel?.value
+            ?: 0
 
     val listState =
         rememberScalingLazyListState()
@@ -85,6 +104,20 @@ fun HomeScreen(
      * 실제 HeartRateManager StateFlow 연결 전 임시 값
      */
     val heartRate = "72"
+
+    val safeZoneColor =
+        when (safeZoneStatus) {
+            SafeZoneStatus.CHECKING -> HomeSecondaryText
+            SafeZoneStatus.SAFE -> HomeGreen
+            SafeZoneStatus.OUTSIDE -> HomeRed
+        }
+
+    val safeZoneLabel =
+        when (safeZoneStatus) {
+            SafeZoneStatus.CHECKING -> "위치 확인 중"
+            SafeZoneStatus.SAFE -> "안전"
+            SafeZoneStatus.OUTSIDE -> "안전구역 이탈"
+        }
 
 
     Scaffold(
@@ -223,7 +256,7 @@ fun HomeScreen(
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(
-                            HomeGreen.copy(
+                            safeZoneColor.copy(
                                 alpha = 0.15f
                             )
                         ),
@@ -233,10 +266,19 @@ fun HomeScreen(
 
                 ) {
 
-                    SafetyCheckIcon(
-                        modifier =
-                            Modifier.size(27.dp)
-                    )
+                    if (safeZoneStatus == SafeZoneStatus.SAFE) {
+                        SafetyCheckIcon(
+                            modifier =
+                                Modifier.size(27.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Warning,
+                            contentDescription = safeZoneLabel,
+                            modifier = Modifier.size(27.dp),
+                            tint = safeZoneColor
+                        )
+                    }
                 }
             }
 
@@ -251,10 +293,10 @@ fun HomeScreen(
 
                 Text(
 
-                    text = "안전",
+                    text = safeZoneLabel,
 
                     style = TextStyle(
-                        color = Color.White,
+                        color = safeZoneColor,
                         fontSize = 19.sp,
                         fontWeight =
                             FontWeight.Bold
