@@ -952,7 +952,7 @@ class MainActivity :
                     },
 
 
-                    onReturnHomeRequestAccepted = {
+                    onReturnHomeRequestHandled = {
                             requestId ->
 
 
@@ -1105,7 +1105,9 @@ class MainActivity :
                 /*
                  * HOME 안전구역 조회
                  */
-                refreshHomeSafeZone()
+                refreshHomeSafeZone(
+                    source = "PAIRING_REFRESH"
+                )
 
 
                 /*
@@ -1142,6 +1144,19 @@ class MainActivity :
 
                             return@start
                         }
+
+
+                        /*
+                         * 보호자 앱에서 HOME 안전구역이 변경됐을 수 있으므로
+                         * 새 귀가 요청을 받을 때마다 최신 HOME을 다시 조회한다.
+                         *
+                         * 조회가 비동기로 진행되더라도 TmapRouteTestScreen은
+                         * homeLatitude / homeLongitude / homeRadiusMeters가
+                         * 갱신되면 LaunchedEffect가 다시 실행된다.
+                         */
+                        refreshHomeSafeZone(
+                            source = "REALTIME_REQUEST"
+                        )
 
 
                         /*
@@ -1204,7 +1219,15 @@ class MainActivity :
      * =====================================================
      */
 
-    private fun refreshHomeSafeZone() {
+    private fun refreshHomeSafeZone(
+        source: String = "UNKNOWN"
+    ) {
+
+        Log.d(
+            "HomeSafeZone",
+            "HOME 안전구역 최신 조회 시작 source=$source"
+        )
+
 
         lifecycleScope.launch {
 
@@ -1236,7 +1259,7 @@ class MainActivity :
 
                     Log.d(
                         "HomeSafeZone",
-                        "등록된 집 안전구역이 없습니다."
+                        "등록된 집 안전구역이 없습니다. source=$source"
                     )
 
 
@@ -1258,7 +1281,8 @@ class MainActivity :
 
                 Log.d(
                     "HomeSafeZone",
-                    "집 안전구역 조회 성공 " +
+                    "집 안전구역 최신 조회 성공 " +
+                            "source=$source " +
                             "latitude=${home.centerLatitude} " +
                             "longitude=${home.centerLongitude} " +
                             "radius=${home.radiusMeters}"
@@ -1269,7 +1293,7 @@ class MainActivity :
 
                 Log.e(
                     "HomeSafeZone",
-                    "집 안전구역 조회 실패",
+                    "집 안전구역 최신 조회 실패 source=$source",
                     error
                 )
             }
@@ -1456,6 +1480,16 @@ class MainActivity :
 
             return
         }
+
+
+        /*
+         * 보호자 앱에서 HOME 설정을 바꾼 뒤
+         * 워치 앱이 계속 실행 중일 수 있으므로
+         * FCM / Notification 경로에서도 최신 HOME을 다시 조회한다.
+         */
+        refreshHomeSafeZone(
+            source = source
+        )
 
 
         /*
@@ -1649,6 +1683,21 @@ class MainActivity :
             "ReturnHomeFCM",
             "MainActivity Foreground"
         )
+
+
+        /*
+         * 보호자 앱에서 HOME 안전구역을 변경한 뒤
+         * 워치 앱으로 돌아온 경우 최신 HOME 정보를 다시 받는다.
+         */
+        if (
+            !guardianIdState.value.isNullOrBlank() &&
+            !wearerIdState.value.isNullOrBlank()
+        ) {
+
+            refreshHomeSafeZone(
+                source = "ON_RESUME"
+            )
+        }
     }
 
 
@@ -1820,7 +1869,7 @@ fun EmergencyManager(
         () -> Unit,
 
 
-    onReturnHomeRequestAccepted:
+    onReturnHomeRequestHandled:
         (String) -> Unit,
 
 
@@ -2166,6 +2215,13 @@ fun EmergencyManager(
 
             ReturnHomeRequestScreen(
 
+                /*
+                 * =============================================
+                 * 집으로 가기
+                 *
+                 * REQUESTED → ACCEPTED
+                 * =============================================
+                 */
                 onGoHomeClick = {
 
 
@@ -2217,7 +2273,14 @@ fun EmergencyManager(
                             }.onSuccess {
 
 
-                                onReturnHomeRequestAccepted(
+                                /*
+                                 * 같은 요청이 FCM / Realtime으로
+                                 * 다시 표시되지 않도록 처리.
+                                 *
+                                 * requestId 자체는 지우지 않는다.
+                                 * 이후 NAVIGATING / COMPLETED에서 사용한다.
+                                 */
+                                onReturnHomeRequestHandled(
                                     requestId
                                 )
 
@@ -2255,11 +2318,109 @@ fun EmergencyManager(
                 },
 
 
+                /*
+                 * =============================================
+                 * 나중에
+                 *
+                 * REQUESTED → CANCELLED
+                 *
+                 * 보호자 앱이 Realtime으로 CANCELLED를 수신하면
+                 * 귀가 요청 버튼이 다시 활성화된다.
+                 * =============================================
+                 */
                 onDismissClick = {
 
-                    onScreenChange(
-                        AppScreen.HOME
-                    )
+
+                    val requestId =
+                        returnHomeRequestId
+
+
+                    val currentGuardianId =
+                        guardianId
+
+
+                    val currentWearerId =
+                        wearerId
+
+
+                    if (
+                        requestId == null ||
+                        currentGuardianId == null ||
+                        currentWearerId == null
+                    ) {
+
+                        Toast
+                            .makeText(
+                                context,
+                                "귀가 요청 정보를 확인할 수 없습니다.",
+                                Toast.LENGTH_SHORT
+                            )
+                            .show()
+
+                    } else {
+
+                        eventScope.launch {
+
+                            runCatching {
+
+                                returnHomeRealtimeManager
+                                    .cancelRequest(
+
+                                        requestId =
+                                            requestId,
+
+                                        guardianId =
+                                            currentGuardianId,
+
+                                        wearerId =
+                                            currentWearerId
+                                    )
+
+                            }.onSuccess {
+
+
+                                onReturnHomeRequestHandled(
+                                    requestId
+                                )
+
+
+                                /*
+                                 * CANCELLED된 요청은 더 이상
+                                 * 현재 귀가 요청으로 유지하지 않는다.
+                                 */
+                                onClearReturnHomeRequest()
+
+
+                                Log.d(
+                                    "ReturnHome",
+                                    "귀가 요청 CANCELLED 성공: $requestId"
+                                )
+
+
+                                onScreenChange(
+                                    AppScreen.HOME
+                                )
+
+
+                            }.onFailure { error ->
+
+                                Log.e(
+                                    "ReturnHome",
+                                    "귀가 요청 CANCELLED 실패",
+                                    error
+                                )
+
+
+                                Toast
+                                    .makeText(
+                                        context,
+                                        "귀가 요청 응답에 실패했습니다.",
+                                        Toast.LENGTH_SHORT
+                                    )
+                                    .show()
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -2474,7 +2635,47 @@ fun EmergencyManager(
                     homeLatitude,
 
                 homeLongitude =
-                    homeLongitude
+                    homeLongitude,
+
+                homeRadiusMeters =
+                    homeRadiusMeters,
+
+                /*
+                 * MainActivity에서 이미 수신 중인
+                 * 실제 워치 GPS 위치를 그대로 전달한다.
+                 *
+                 * TmapRouteTestScreen 내부에서
+                 * WatchLocationManager를 새로 만들지 않는다.
+                 */
+                watchLocation =
+                    watchLocation,
+
+                /*
+                 * HOME 반경 진입 후
+                 * NAVIGATING → COMPLETED 성공 시 호출.
+                 */
+                onReturnHomeCompleted = {
+                        requestId ->
+
+
+                    onReturnHomeRequestHandled(
+                        requestId
+                    )
+
+
+                    onClearReturnHomeRequest()
+
+
+                    Log.d(
+                        "ReturnHome",
+                        "귀가 완료 처리 성공: $requestId"
+                    )
+
+
+                    onScreenChange(
+                        AppScreen.HOME
+                    )
+                }
             )
         }
 
