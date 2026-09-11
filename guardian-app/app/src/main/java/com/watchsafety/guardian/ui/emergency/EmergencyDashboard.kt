@@ -1,9 +1,10 @@
 package com.watchsafety.guardian.ui.emergency
 
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,34 +66,62 @@ fun EmergencyScreen(
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()),
     ) {
-        EmergencyHero(detail = detail, onBack = onBack)
+        EmergencyHero(
+            detail = detail,
+            onBack = onBack,
+        )
+
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            EmergencyTimeline(detail = detail)
-            EmergencyLocationCard(locationLabel = detail.locationLabel, location = location)
+            EmergencyTimeline(
+                detail = detail,
+            )
+
+            EmergencyLocationCard(
+                detail = detail,
+                location = location,
+                onMapClick = onMapClick,
+            )
+
             Button(
                 onClick = {
                     context.startActivity(
-                        Intent(Intent.ACTION_DIAL, Uri.parse("tel:${detail.phoneNumber}")),
+                        Intent(
+                            Intent.ACTION_DIAL,
+                            "tel:${detail.phoneNumber}".toUri(),
+                        ),
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = EmergencyRed),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = EmergencyRed,
+                ),
                 shape = RoundedCornerShape(14.dp),
             ) {
-                Icon(imageVector = Icons.Rounded.Call, contentDescription = null)
+                Icon(
+                    imageVector = Icons.Rounded.Call,
+                    contentDescription = null,
+                )
+
                 Text(
                     text = "${detail.userName} 님에게 전화 걸기",
-                    modifier = Modifier.padding(vertical = 7.dp, horizontal = 8.dp),
+                    modifier = Modifier.padding(
+                        vertical = 7.dp,
+                        horizontal = 8.dp,
+                    ),
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
+
             OutlinedButton(
                 onClick = onMapClick,
                 modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, DividerColor),
+                border = BorderStroke(
+                    1.dp,
+                    DividerColor,
+                ),
                 shape = RoundedCornerShape(14.dp),
             ) {
                 Text(
@@ -101,6 +130,7 @@ fun EmergencyScreen(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
+
             Text(
                 text = "상황이 해결되었어요 · 알림 종료",
                 modifier = Modifier.fillMaxWidth(),
@@ -112,6 +142,7 @@ fun EmergencyScreen(
     }
 }
 
+
 @Composable
 private fun EmergencyHero(
     detail: EmergencyDetail,
@@ -121,16 +152,28 @@ private fun EmergencyHero(
         modifier = Modifier
             .fillMaxWidth()
             .background(EmergencyRedContainer)
-            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 28.dp),
+            .padding(
+                start = 12.dp,
+                top = 12.dp,
+                end = 12.dp,
+                bottom = 28.dp,
+            ),
     ) {
         IconButton(
             onClick = onBack,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .background(Color.White, CircleShape),
+                .background(
+                    Color.White,
+                    CircleShape,
+                ),
         ) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "뒤로 가기")
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = "뒤로 가기",
+            )
         }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -139,8 +182,14 @@ private fun EmergencyHero(
         ) {
             Row(
                 modifier = Modifier
-                    .background(EmergencyRed, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .background(
+                        EmergencyRed,
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(
+                        horizontal = 16.dp,
+                        vertical = 8.dp,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -149,6 +198,7 @@ private fun EmergencyHero(
                     tint = Color.White,
                     modifier = Modifier.size(17.dp),
                 )
+
                 Text(
                     text = "긴급 상황",
                     modifier = Modifier.padding(start = 6.dp),
@@ -156,23 +206,33 @@ private fun EmergencyHero(
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
+
             Box(
                 modifier = Modifier
                     .padding(top = 22.dp)
                     .size(104.dp)
-                    .background(EmergencyRed.copy(alpha = .12f), CircleShape),
+                    .background(
+                        EmergencyRed.copy(alpha = .12f),
+                        CircleShape,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
                         .size(78.dp)
-                        .background(EmergencyRed.copy(alpha = .22f), CircleShape),
+                        .background(
+                            EmergencyRed.copy(alpha = .22f),
+                            CircleShape,
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .background(EmergencyRed, CircleShape),
+                            .background(
+                                EmergencyRed,
+                                CircleShape,
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -183,12 +243,14 @@ private fun EmergencyHero(
                     }
                 }
             }
+
             Text(
                 text = detail.title,
                 modifier = Modifier.padding(top = 18.dp),
                 style = MaterialTheme.typography.headlineMedium,
                 textAlign = TextAlign.Center,
             )
+
             Text(
                 text = "${detail.description} · ${detail.occurredAtLabel}",
                 modifier = Modifier.padding(top = 6.dp),
@@ -200,16 +262,27 @@ private fun EmergencyHero(
     }
 }
 
+
 @Composable
-private fun EmergencyTimeline(detail: EmergencyDetail) {
+private fun EmergencyTimeline(
+    detail: EmergencyDetail,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, DividerColor),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White,
+        ),
+        border = BorderStroke(
+            1.dp,
+            DividerColor,
+        ),
         shape = RoundedCornerShape(18.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+        ) {
             detail.timeline.forEach { item ->
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -219,8 +292,12 @@ private fun EmergencyTimeline(detail: EmergencyDetail) {
                     Box(
                         modifier = Modifier
                             .size(9.dp)
-                            .background(EmergencyRed, CircleShape),
+                            .background(
+                                EmergencyRed,
+                                CircleShape,
+                            ),
                     )
+
                     Text(
                         text = item.label,
                         modifier = Modifier
@@ -229,6 +306,7 @@ private fun EmergencyTimeline(detail: EmergencyDetail) {
                         fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium,
                     )
+
                     Text(
                         text = item.timeLabel,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -240,24 +318,124 @@ private fun EmergencyTimeline(detail: EmergencyDetail) {
     }
 }
 
+
+/*
+ * =========================================================
+ * SOS 위치 카드
+ * =========================================================
+ *
+ * 기존 MockMap 그림 대신 실제 TMAP을 표시한다.
+ *
+ * 현재 표시 좌표:
+ * GuardianSnapshot.location에 저장된
+ * 워치 착용자의 최신 위치.
+ *
+ * 지도 위에는 투명 클릭 영역을 덮어서
+ * 작은 미리보기 지도 자체가 움직이지 않도록 하고,
+ * 누르면 전체 지도 화면으로 이동한다.
+ */
 @Composable
-private fun EmergencyLocationCard(locationLabel: String, location: LocationInfo) {
+private fun EmergencyLocationCard(
+    detail: EmergencyDetail,
+    location: LocationInfo,
+    onMapClick: () -> Unit,
+) {
+    val hasValidCoordinate =
+        location.latitude in -90.0..90.0 &&
+                location.longitude in -180.0..180.0 &&
+                (
+                        location.latitude != 0.0 ||
+                                location.longitude != 0.0
+                        )
+
+    val locationText =
+        location.address
+            .takeIf { it.isNotBlank() }
+            ?: detail.locationLabel
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, DividerColor),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White,
+        ),
+        border = BorderStroke(
+            1.dp,
+            DividerColor,
+        ),
         shape = RoundedCornerShape(18.dp),
     ) {
         Column {
-            TmapMapView(
-                latitude = location.latitude,
-                longitude = location.longitude,
+
+            /*
+             * =================================================
+             * 실제 TMAP 미리보기
+             * =================================================
+             */
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp),
-                showLocationMarker = true,
-                followLocation = true,
-            )
+            ) {
+
+                if (hasValidCoordinate) {
+
+                    TmapMapView(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        zoomLevel = 17,
+                        showLocationMarker = true,
+                        followLocation = true,
+                        safeZones = emptyList(),
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    /*
+                     * 작은 미리보기 지도에서는
+                     * 사용자가 실수로 드래그/확대하지 않도록
+                     * 투명 클릭 영역을 지도 위에 덮는다.
+                     *
+                     * 터치하면 전체 지도 화면으로 이동한다.
+                     */
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                onClick = onMapClick,
+                            ),
+                    )
+
+                } else {
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                MaterialTheme
+                                    .colorScheme
+                                    .surfaceVariant,
+                            )
+                            .clickable(
+                                onClick = onMapClick,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "위치 정보를 확인할 수 없습니다.",
+                            color = MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+
+
+            /*
+             * =================================================
+             * 위치 설명
+             * =================================================
+             */
             Row(
                 modifier = Modifier.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -267,17 +445,33 @@ private fun EmergencyLocationCard(locationLabel: String, location: LocationInfo)
                     contentDescription = null,
                     tint = EmergencyRed,
                 )
-                Text(
-                    text = locationLabel,
+
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = 6.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                        .padding(start = 8.dp),
+                ) {
+                    Text(
+                        text = "현재 위치",
+                        color = MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+
+                    Text(
+                        text = locationText,
+                        modifier = Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
                 Text(
-                    text = "1분 전",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = location.lastUpdatedLabel,
+                    color = MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
@@ -285,14 +479,23 @@ private fun EmergencyLocationCard(locationLabel: String, location: LocationInfo)
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+
+private val emergencyPreviewSnapshot =
+    MockGuardianRepository()
+        .snapshot
+        .value
+
+@Preview(
+    showBackground = true,
+    widthDp = 390,
+    heightDp = 844,
+)
 @Composable
 private fun EmergencyDashboardPreview() {
-    val preview = MockGuardianRepository().snapshot.value
     WatchSafetyTheme {
         EmergencyScreen(
-            detail = preview.emergency,
-            location = preview.location,
+            detail = emergencyPreviewSnapshot.emergency,
+            location = emergencyPreviewSnapshot.location,
             onBack = {},
             onMapClick = {},
         )

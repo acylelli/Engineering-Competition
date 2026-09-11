@@ -3,17 +3,13 @@ package com.watchsafety.guardian.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-
 import com.watchsafety.guardian.domain.model.GuardianSnapshot
 import com.watchsafety.guardian.domain.model.NotificationSettings
 import com.watchsafety.guardian.domain.model.SafeZoneKind
-
 import com.watchsafety.guardian.ui.PairingUiState
-
 import com.watchsafety.guardian.ui.emergency.EmergencyScreen
 import com.watchsafety.guardian.ui.history.HistoryScreen
 import com.watchsafety.guardian.ui.home.HomeScreen
@@ -95,6 +91,9 @@ fun GuardianNavGraph(
         (String) -> Unit,
 
     onResetPairingState:
+        () -> Unit,
+
+    onLogout:
         () -> Unit,
 
     modifier:
@@ -301,6 +300,9 @@ fun GuardianNavGraph(
                             GuardianRoute.WATCH_PAIRING
                         )
                 },
+
+                onLogout =
+                    onLogout,
             )
         }
 
@@ -373,8 +375,11 @@ fun GuardianNavGraph(
                 },
 
                 onEditClick = { zoneId ->
+
                     navController.navigate(
-                        GuardianRoute.safeZoneEdit(zoneId)
+                        GuardianRoute.safeZoneEdit(
+                            zoneId
+                        )
                     )
                 },
 
@@ -422,10 +427,6 @@ fun GuardianNavGraph(
 
                 /*
                  * 기존 HOME 이름 전달
-                 *
-                 * 새 안전구역에서
-                 * "집으로 지정"을 켜면
-                 * 기존 집이 교체된다는 안내에 사용.
                  */
                 existingHomeName =
                     existingHomeName,
@@ -442,10 +443,6 @@ fun GuardianNavGraph(
                         isHome ->
 
 
-                    /*
-                     * ViewModel / Repository까지
-                     * isHome 전달
-                     */
                     onAddSafeZone(
 
                         name,
@@ -466,43 +463,117 @@ fun GuardianNavGraph(
             )
         }
 
+
+        /*
+         * =====================================================
+         * 안전구역 수정
+         * =====================================================
+         */
+
         composable(
             "${GuardianRoute.SAFE_ZONE_EDIT}/{zoneId}"
         ) { backStackEntry ->
-            val zoneId = backStackEntry.arguments?.getString("zoneId")
-            val zone = snapshot.safeZones.firstOrNull { it.id == zoneId }
 
-            if (zone == null) {
-                LaunchedEffect(zoneId) {
-                    navController.popBackStack()
-                }
-            } else {
-                val existingHomeName = snapshot.safeZones
+            val zoneId =
+                backStackEntry
+                    .arguments
+                    ?.getString(
+                        "zoneId"
+                    )
+
+            val zone =
+                snapshot
+                    .safeZones
                     .firstOrNull {
-                        it.kind == SafeZoneKind.HOME && it.id != zone.id
+                        it.id == zoneId
                     }
-                    ?.name
+
+
+            if (
+                zone == null
+            ) {
+
+                LaunchedEffect(
+                    zoneId
+                ) {
+
+                    navController
+                        .popBackStack()
+                }
+
+            } else {
+
+                val existingHomeName =
+
+                    snapshot
+                        .safeZones
+                        .firstOrNull {
+
+                            it.kind ==
+                                    SafeZoneKind.HOME &&
+                                    it.id !=
+                                    zone.id
+                        }
+                        ?.name
+
 
                 AddSafeZoneScreen(
-                    initialLatitude = zone.centerLatitude,
-                    initialLongitude = zone.centerLongitude,
-                    existingHomeName = existingHomeName,
-                    initialName = zone.name,
-                    initialRadiusMeters = zone.radiusMeters,
-                    initialIsHome = zone.kind == SafeZoneKind.HOME,
-                    screenTitle = "안전구역 수정",
-                    saveButtonText = "변경사항 저장",
-                    onBack = navController::popBackStack,
-                    onSave = { name, radius, latitude, longitude, isHome ->
-                        onUpdateSafeZone(
-                            zone.id,
+
+                    initialLatitude =
+                        zone.centerLatitude,
+
+                    initialLongitude =
+                        zone.centerLongitude,
+
+                    existingHomeName =
+                        existingHomeName,
+
+                    initialName =
+                        zone.name,
+
+                    initialRadiusMeters =
+                        zone.radiusMeters,
+
+                    initialIsHome =
+                        zone.kind ==
+                                SafeZoneKind.HOME,
+
+                    screenTitle =
+                        "안전구역 수정",
+
+                    saveButtonText =
+                        "변경사항 저장",
+
+                    onBack =
+                        navController::
+                        popBackStack,
+
+                    onSave = {
                             name,
                             radius,
                             latitude,
                             longitude,
+                            isHome ->
+
+
+                        onUpdateSafeZone(
+
+                            zone.id,
+
+                            name,
+
+                            radius,
+
+                            latitude,
+
+                            longitude,
+
                             isHome,
                         )
-                        navController.popBackStack()
+
+
+                        navController
+                            .popBackStack()
                     },
                 )
             }
@@ -524,6 +595,11 @@ fun GuardianNavGraph(
                 detail =
                     snapshot.emergency,
 
+                /*
+                 * =================================================
+                 * 실제 TMAP에 표시할 워치의 최신 위치
+                 * =================================================
+                 */
                 location =
                     snapshot.location,
 

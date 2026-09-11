@@ -165,6 +165,53 @@ class KakaoAuthManager(
 
     /*
      * =====================================================
+     * Kakao / Supabase 로그아웃
+     * =====================================================
+     */
+
+    suspend fun logout() {
+
+        val kakaoLogoutFailure =
+            runCatching {
+                logoutFromKakao()
+            }.exceptionOrNull()
+
+        /*
+         * Supabase 세션은 반드시 정리한다.
+         * 카카오 토큰이 이미 만료된 경우에도 앱 로그아웃은 가능해야 한다.
+         */
+        supabase
+            .auth
+            .signOut()
+
+        if (kakaoLogoutFailure != null) {
+            android.util.Log.w(
+                "GuardianAuth",
+                "Kakao 세션 정리 실패 - Supabase 로그아웃은 완료됨",
+                kakaoLogoutFailure,
+            )
+        }
+    }
+
+
+    private suspend fun logoutFromKakao(): Unit =
+        suspendCoroutine { continuation ->
+
+            UserApiClient
+                .instance
+                .logout { error ->
+
+                    if (error != null) {
+                        continuation.resumeWithException(error)
+                    } else {
+                        continuation.resume(Unit)
+                    }
+                }
+        }
+
+
+    /*
+     * =====================================================
      * Kakao SDK 로그인
      * =====================================================
      */
