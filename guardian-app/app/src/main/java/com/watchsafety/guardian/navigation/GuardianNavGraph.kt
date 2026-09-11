@@ -524,6 +524,9 @@ fun GuardianNavGraph(
                 detail =
                     snapshot.emergency,
 
+                location =
+                    snapshot.location,
+
                 onBack =
                     navController::
                     popBackStack,

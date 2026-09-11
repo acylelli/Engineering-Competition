@@ -43,7 +43,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.watchsafety.guardian.data.MockGuardianRepository
 import com.watchsafety.guardian.domain.model.EmergencyDetail
-import com.watchsafety.guardian.ui.components.MockMap
+import com.watchsafety.guardian.domain.model.LocationInfo
+import com.watchsafety.guardian.ui.map.TmapMapView
 import com.watchsafety.guardian.ui.theme.DividerColor
 import com.watchsafety.guardian.ui.theme.EmergencyRed
 import com.watchsafety.guardian.ui.theme.EmergencyRedContainer
@@ -52,6 +53,7 @@ import com.watchsafety.guardian.ui.theme.WatchSafetyTheme
 @Composable
 fun EmergencyScreen(
     detail: EmergencyDetail,
+    location: LocationInfo,
     onBack: () -> Unit,
     onMapClick: () -> Unit,
 ) {
@@ -69,7 +71,7 @@ fun EmergencyScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             EmergencyTimeline(detail = detail)
-            EmergencyLocationCard(locationLabel = detail.locationLabel)
+            EmergencyLocationCard(locationLabel = detail.locationLabel, location = location)
             Button(
                 onClick = {
                     context.startActivity(
@@ -239,7 +241,7 @@ private fun EmergencyTimeline(detail: EmergencyDetail) {
 }
 
 @Composable
-private fun EmergencyLocationCard(locationLabel: String) {
+private fun EmergencyLocationCard(locationLabel: String, location: LocationInfo) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -247,13 +249,14 @@ private fun EmergencyLocationCard(locationLabel: String) {
         shape = RoundedCornerShape(18.dp),
     ) {
         Column {
-            MockMap(
+            TmapMapView(
+                latitude = location.latitude,
+                longitude = location.longitude,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp),
-                showZoneLabel = false,
-                showUserLabel = false,
-                showControls = false,
+                showLocationMarker = true,
+                followLocation = true,
             )
             Row(
                 modifier = Modifier.padding(12.dp),
@@ -289,6 +292,7 @@ private fun EmergencyDashboardPreview() {
     WatchSafetyTheme {
         EmergencyScreen(
             detail = preview.emergency,
+            location = preview.location,
             onBack = {},
             onMapClick = {},
         )
