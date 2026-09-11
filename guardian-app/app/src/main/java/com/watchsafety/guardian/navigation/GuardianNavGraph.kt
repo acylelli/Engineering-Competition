@@ -97,6 +97,9 @@ fun GuardianNavGraph(
     onResetPairingState:
         () -> Unit,
 
+    onLogout:
+        () -> Unit,
+
     modifier:
     Modifier = Modifier,
 
@@ -301,6 +304,9 @@ fun GuardianNavGraph(
                             GuardianRoute.WATCH_PAIRING
                         )
                 },
+
+                onLogout =
+                    onLogout,
             )
         }
 

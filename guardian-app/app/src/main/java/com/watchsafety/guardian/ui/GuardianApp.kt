@@ -34,6 +34,9 @@ fun GuardianApp(
 
     emergencyRequestVersion:
     Long = 0L,
+
+    onLogout:
+        () -> Unit = {},
 ) {
 
 
@@ -489,6 +492,14 @@ fun GuardianApp(
             onResetPairingState =
                 guardianViewModel::
                 resetPairingState,
+
+
+            /*
+             * 로그아웃
+             */
+
+            onLogout =
+                onLogout,
 
 
             /*

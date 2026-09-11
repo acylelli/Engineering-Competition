@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
@@ -93,9 +94,17 @@ fun SettingsScreen(
     onWatchPairingClick:
         () -> Unit,
 
+    onLogout:
+        () -> Unit,
+
     ) {
 
     var showEmergencyPhoneDialog by
+        remember {
+            mutableStateOf(false)
+        }
+
+    var showLogoutDialog by
         remember {
             mutableStateOf(false)
         }
@@ -391,6 +400,30 @@ fun SettingsScreen(
 
                 }
             }
+
+
+            /*
+             * =================================================
+             * 계정
+             * =================================================
+             */
+
+            item {
+                SectionTitle(
+                    "계정"
+                )
+            }
+
+
+            item {
+                SettingsCard {
+                    LogoutSettingRow(
+                        onClick = {
+                            showLogoutDialog = true
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -494,6 +527,91 @@ fun SettingsScreen(
                     )
                 }
             },
+        )
+    }
+
+
+    if (
+        showLogoutDialog
+    ) {
+
+        AlertDialog(
+            onDismissRequest = {
+                showLogoutDialog = false
+            },
+            title = {
+                Text(
+                    "로그아웃하시겠어요?"
+                )
+            },
+            text = {
+                Text(
+                    "현재 기기의 로그인 세션이 종료되고 로그인 화면으로 이동합니다.",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout()
+                    },
+                ) {
+                    Text(
+                        text = "로그아웃",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                    },
+                ) {
+                    Text(
+                        "취소"
+                    )
+                }
+            },
+        )
+    }
+}
+
+
+@Composable
+private fun LogoutSettingRow(
+    onClick: () -> Unit,
+) {
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(
+                    onClick = onClick
+                )
+                .padding(
+                    vertical = 14.dp
+                ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.ExitToApp,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+        )
+
+        Text(
+            text = "로그아웃",
+            color = MaterialTheme.colorScheme.error,
+            fontWeight = FontWeight.SemiBold,
+            modifier =
+                Modifier.padding(
+                    start = 12.dp
+                ),
         )
     }
 }
@@ -1274,6 +1392,8 @@ private fun SettingsDashboardPreview() {
             onSafeZonesClick = {},
 
             onWatchPairingClick = {},
+
+            onLogout = {},
         )
     }
 }

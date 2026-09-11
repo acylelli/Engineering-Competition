@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -215,7 +216,9 @@ class MainActivity :
 
                         GuardianApp(
                             emergencyRequestVersion =
-                                emergencyRequestVersion
+                                emergencyRequestVersion,
+                            onLogout =
+                                ::startLogout,
                         )
                     }
                 }
@@ -230,6 +233,48 @@ class MainActivity :
          */
 
         checkSavedLoginSession()
+    }
+
+
+    /*
+     * =====================================================
+     * 로그아웃
+     * =====================================================
+     */
+
+    private fun startLogout() {
+
+        lifecycleScope.launch {
+
+            runCatching {
+                kakaoAuthManager.logout()
+            }.onSuccess {
+
+                loginErrorMessage = null
+                authUiState = AuthUiState.SIGNED_OUT
+
+                Log.d(
+                    AUTH_TAG,
+                    "Kakao/Supabase 로그아웃 완료",
+                )
+
+            }.onFailure { error ->
+
+                Log.e(
+                    AUTH_TAG,
+                    "Kakao/Supabase 로그아웃 실패",
+                    error,
+                )
+
+                Toast
+                    .makeText(
+                        this@MainActivity,
+                        "로그아웃하지 못했습니다. 다시 시도해주세요.",
+                        Toast.LENGTH_SHORT,
+                    )
+                    .show()
+            }
+        }
     }
 
 
