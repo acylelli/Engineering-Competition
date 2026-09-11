@@ -1,11 +1,13 @@
 package com.example.watchsafety.health
 
 import android.content.Context
+import android.util.Log
 import androidx.health.services.client.HealthServices
 import androidx.health.services.client.MeasureCallback
 import androidx.health.services.client.data.Availability
 import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
+import androidx.health.services.client.data.DataTypeAvailability
 import androidx.health.services.client.data.DeltaDataType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,29 +34,37 @@ class HeartRateManager(
     val isAvailable: StateFlow<Boolean> =
         _isAvailable
 
-    private val callback =
+    private var activeCallback: MeasureCallback? = null
+
+    private fun createCallback(): MeasureCallback =
         object : MeasureCallback {
+
+            override fun onRegistrationFailed(throwable: Throwable) {
+                if (activeCallback !== this) return
+                activeCallback = null
+                _heartRate.value = null
+                _isAvailable.value = false
+                Log.w("WatchHeartRate", "심박수 센서 등록 실패", throwable)
+            }
 
             override fun onAvailabilityChanged(
                 dataType: DeltaDataType<*, *>,
                 availability: Availability
             ) {
 
+                if (activeCallback !== this) return
                 if (dataType == DataType.HEART_RATE_BPM) {
-
-                    /*
-                     * Availability 클래스의 세부 상태에 의존하지 않고,
-                     * callback이 들어왔다는 것만 기록한다.
-                     *
-                     * 실제 심박수 데이터가 들어오면 아래
-                     * onDataReceived()에서 true로 변경된다.
-                     */
+                    _isAvailable.value = availability == DataTypeAvailability.AVAILABLE
+                    if (!_isAvailable.value) {
+                        _heartRate.value = null
+                    }
                 }
             }
 
             override fun onDataReceived(
                 data: DataPointContainer
             ) {
+                if (activeCallback !== this) return
 
                 val heartRatePoints =
                     data.getData(
@@ -64,7 +74,7 @@ class HeartRateManager(
                 val latest =
                     heartRatePoints.lastOrNull()
 
-                if (latest != null) {
+                if (latest != null && latest.value.isFinite() && latest.value > 0.0) {
 
                     _heartRate.value =
                         latest.value
@@ -87,19 +97,33 @@ class HeartRateManager(
     }
 
     fun start() {
-
-        measureClient.registerMeasureCallback(
-            DataType.HEART_RATE_BPM,
-            callback
-        )
-    }
-
-    fun stop() {
-
-        measureClient
-            .unregisterMeasureCallbackAsync(
+        if (activeCallback != null) return
+        val callback = createCallback()
+        activeCallback = callback
+        try {
+            measureClient.registerMeasureCallback(
                 DataType.HEART_RATE_BPM,
                 callback
             )
+        } catch (error: Exception) {
+            activeCallback = null
+            _heartRate.value = null
+            _isAvailable.value = false
+            throw error
+        }
+    }
+
+    fun stop() {
+        val callback = activeCallback
+        activeCallback = null
+        _heartRate.value = null
+        _isAvailable.value = false
+        if (callback != null) {
+            measureClient
+                .unregisterMeasureCallbackAsync(
+                    DataType.HEART_RATE_BPM,
+                    callback
+                )
+        }
     }
 }

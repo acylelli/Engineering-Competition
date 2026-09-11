@@ -830,8 +830,7 @@ class MainActivity :
                         bodySensorsGranted
                     ) {
 
-                        heartRateManager
-                            .start()
+                        startHeartRateMeasurement()
 
                     } else {
 
@@ -1776,6 +1775,27 @@ class MainActivity :
     }
 
 
+    private fun startHeartRateMeasurement() {
+        if (!isActivityResumed ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                if (heartRateManager.isHeartRateSupported() && isActivityResumed) {
+                    heartRateManager.start()
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w("WatchHeartRate", "심박수 측정을 시작하지 못했습니다.", error)
+            }
+        }
+    }
+
     override fun onResume() {
 
         super.onResume()
@@ -1784,6 +1804,7 @@ class MainActivity :
         isActivityResumed =
             true
 
+        startHeartRateMeasurement()
 
         isInForeground =
             true
@@ -1816,6 +1837,7 @@ class MainActivity :
         isActivityResumed =
             false
 
+        heartRateManager.stop()
 
         isInForeground =
             false
@@ -2260,6 +2282,8 @@ fun EmergencyManager(
         AppScreen.HOME -> {
 
             HomeScreen(
+
+                heartRate = heartRate,
 
                 guardianConnected =
                     guardianConnected,

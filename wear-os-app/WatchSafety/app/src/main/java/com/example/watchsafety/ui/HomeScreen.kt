@@ -80,7 +80,8 @@ fun HomeScreen(
     onGoHomeClick: () -> Unit,
     onSosClick: () -> Unit,
     onGuardianConnectClick: () -> Unit,
-    previewBatteryLevel: Int? = null
+    previewBatteryLevel: Int? = null,
+    heartRate: Float? = null,
 ) {
 
     val liveBatteryLevel =
@@ -98,12 +99,6 @@ fun HomeScreen(
     val listState =
         rememberScalingLazyListState()
 
-
-    /*
-     * TODO
-     * 실제 HeartRateManager StateFlow 연결 전 임시 값
-     */
-    val heartRate = "72"
 
     val safeZoneColor =
         when (safeZoneStatus) {
@@ -368,6 +363,9 @@ fun HomeScreen(
                         },
 
                         value = heartRate
+                            ?.takeIf { it.isFinite() && it > 0f }
+                            ?.let { "%.0f".format(it) }
+                            ?: "--"
                     )
 
 
