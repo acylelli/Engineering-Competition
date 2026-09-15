@@ -19,7 +19,7 @@ import androidx.compose.foundation.text.BasicText
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -75,7 +75,10 @@ fun TmapRouteTestScreen(
     watchLocation: WatchLocation?,
 
     onReturnHomeCompleted: (String) -> Unit,
+    onBack: () -> Unit,
 ) {
+
+    var completedRequestId by remember { mutableStateOf<String?>(null) }
 
     val context =
         LocalContext.current
@@ -243,20 +246,6 @@ fun TmapRouteTestScreen(
 
         mutableStateOf<Int?>(
             null
-        )
-    }
-
-
-    /*
-     * =====================================================
-     * 지도 보기 상태
-     * =====================================================
-     */
-    var showMap by
-    remember {
-
-        mutableStateOf(
-            false
         )
     }
 
@@ -1103,6 +1092,11 @@ fun TmapRouteTestScreen(
         voiceManager.speak(
             "집에 도착했습니다. 안전하게 귀가했습니다."
         )
+    }
+
+    // GPS 갱신으로 완료 저장이나 화면 전환 타이머가 취소되지 않도록 분리한다.
+    LaunchedEffect(completedUpdated) {
+        if (!completedUpdated) return@LaunchedEffect
 
 
         val requestId =
@@ -1145,24 +1139,13 @@ fun TmapRouteTestScreen(
                 )
 
 
-                /*
-                 * 짧은 도착 문장이 끝날 시간을 확보.
-                 */
-                delay(
-                    ARRIVAL_VOICE_HOLD_MILLIS
-                )
-
-
-                onReturnHomeCompleted(
-                    requestId
-                )
+                completedRequestId = requestId
 
             } catch (
                 error: Exception
             ) {
 
-                completedUpdated =
-                    false
+                if (error is kotlinx.coroutines.CancellationException) throw error
 
 
                 Log.e(
@@ -1172,53 +1155,20 @@ fun TmapRouteTestScreen(
                 )
 
 
-                statusText =
-                    "귀가 완료 상태 저장 실패"
             }
         }
     }
 
-
-    /*
-     * =====================================================
-     * TMAP 지도 모드
-     * =====================================================
-     *
-     * 음성/센서/귀가 상태 로직은 이 Composable에 그대로 살아 있고
-     * 화면만 지도 전체화면으로 전환한다.
-     */
-    if (
-        showMap
-    ) {
-
-        TmapRouteMapScreen(
-
-            routeResult =
-                routeResult,
-
-            watchLocation =
-                watchLocation,
-
-            homeLatitude =
-                homeLatitude,
-
-            homeLongitude =
-                homeLongitude,
-
-            headingDegrees =
-                headingDegrees,
-
-            onClose = {
-
-                showMap =
-                    false
-            }
-        )
-
-
-        return
+    LaunchedEffect(completedUpdated) {
+        if (!completedUpdated) return@LaunchedEffect
+        delay(ARRIVAL_VOICE_HOLD_MILLIS)
+        val requestId = completedRequestId
+        if (requestId != null) {
+            onReturnHomeCompleted(requestId)
+        } else {
+            onBack()
+        }
     }
-
 
     /*
      * =====================================================
@@ -1301,8 +1251,7 @@ fun TmapRouteTestScreen(
                         )
                         .clickable {
 
-                            showMap =
-                                true
+                            onBack()
                         },
                 contentAlignment =
                     Alignment.Center
@@ -1310,9 +1259,9 @@ fun TmapRouteTestScreen(
 
                 Icon(
                     imageVector =
-                        Icons.Default.Map,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription =
-                        "지도 보기",
+                        "뒤로가기",
                     tint =
                         Color.White,
                     modifier =
@@ -1707,7 +1656,7 @@ fun TmapRouteTestScreen(
 
             /*
              * =================================================
-             * 동그란 지도 버튼
+             * 동그란 뒤로가기 버튼
              * =================================================
              */
             if (
@@ -1739,8 +1688,7 @@ fun TmapRouteTestScreen(
                             )
                             .clickable {
 
-                                showMap =
-                                    true
+                                onBack()
                             },
 
                     contentAlignment =
@@ -1750,10 +1698,10 @@ fun TmapRouteTestScreen(
                     Icon(
 
                         imageVector =
-                            Icons.Default.Map,
+                            Icons.AutoMirrored.Filled.ArrowBack,
 
                         contentDescription =
-                            "지도 보기",
+                            "뒤로가기",
 
                         tint =
                             Color.White,
@@ -2108,4 +2056,4 @@ private const val GUIDE_LOOK_AHEAD_COUNT =
 
 
 private const val ARRIVAL_VOICE_HOLD_MILLIS =
-    2_500L
+    3_000L

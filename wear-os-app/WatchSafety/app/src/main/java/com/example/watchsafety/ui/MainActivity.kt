@@ -2847,6 +2847,8 @@ fun EmergencyManager(
 
             TmapRouteTestScreen(
 
+                onBack = { onScreenChange(AppScreen.HOME) },
+
                 returnHomeRequestId =
                     returnHomeRequestId,
 

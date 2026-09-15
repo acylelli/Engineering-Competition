@@ -25,6 +25,12 @@ class DemoSafetyService : Service(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
     private var lastAlertTime: Long = 0
+    private var impactTimestamp: Long? = null
+    private var stillSince: Long? = null
+    private var lastSampleTimestamp: Long = 0
+    private var stillX = 0f
+    private var stillY = 0f
+    private var stillZ = 0f
 
     override fun onCreate() {
         super.onCreate()
@@ -49,18 +55,51 @@ class DemoSafetyService : Service(), SensorEventListener {
             // 가속도 벡터 크기 계산
             val gForce = sqrt((x * x + y * y + z * z).toDouble()).toFloat() / SensorManager.GRAVITY_EARTH
 
-            // 🚨 시연용 임계값 (2.5g 정도면 워치를 손으로 휙! 세게 흔들면 감지됨)
-            if (gForce > 5.0f) {
+            // 기존 충격 임계값은 유지하고, 이후 연속 2초간 정지해야 확정한다.
+            if (gForce > 10.0f) {
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastAlertTime > 10000) { // 10초 쿨타임
-                    lastAlertTime = currentTime
-                    Log.d("WatchSafety", "시연용 가속도 센서: 낙상(흔들림) 감지됨!")
-
-                    // UI 상태 빨간색으로 변경
-                    FallEventState.onFallDetected()
-                    // 화면 강제로 깨우기
-                    triggerEmergencyScreen()
+                    impactTimestamp = event.timestamp
+                    stillSince = null
                 }
+                return
+            }
+
+            val impact = impactTimestamp ?: return
+            // 충격과 관계없는 나중의 정지가 낙상으로 처리되지 않도록 관찰을 제한한다.
+            if (event.timestamp - impact > 10_000_000_000L) {
+                impactTimestamp = null
+                stillSince = null
+                return
+            }
+
+            // 중력을 포함한 정지 상태와 자세 변화를 함께 확인한다 (노이즈 허용 0.15g).
+            val nearGravity = kotlin.math.abs(gForce - 1f) <= 0.15f
+            val dx = x - stillX
+            val dy = y - stillY
+            val dz = z - stillZ
+            val movement = sqrt(dx * dx + dy * dy + dz * dz) / SensorManager.GRAVITY_EARTH
+            val sampleGap = event.timestamp - lastSampleTimestamp > 500_000_000L
+            lastSampleTimestamp = event.timestamp
+
+            if (!nearGravity) {
+                stillSince = null
+                return
+            }
+            if (stillSince == null || movement > 0.15f || sampleGap) {
+                stillSince = event.timestamp
+                stillX = x
+                stillY = y
+                stillZ = z
+                return
+            }
+            if (event.timestamp - (stillSince ?: return) >= 2_000_000_000L) {
+                impactTimestamp = null
+                stillSince = null
+                lastAlertTime = System.currentTimeMillis()
+                Log.d("WatchSafety", "충격 후 2초간 움직임 없음: 낙상 감지됨!")
+                FallEventState.onFallDetected()
+                triggerEmergencyScreen()
             }
         }
     }
