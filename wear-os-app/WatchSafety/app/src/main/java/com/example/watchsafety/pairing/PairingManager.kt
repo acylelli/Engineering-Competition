@@ -6,6 +6,10 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @Serializable
 data class PairingCodeResponse(
@@ -37,6 +41,13 @@ class PairingManager {
 
 
     companion object {
+        private val infoMutex = Mutex()
+        private val _latestInfo = MutableStateFlow<PairingInfoResponse?>(null)
+        val latestInfo = _latestInfo.asStateFlow()
+
+        fun markUnpaired() {
+            _latestInfo.value = PairingInfoResponse(isPaired = false)
+        }
         private const val TAG =
             "PairingManager"
     }
@@ -148,7 +159,7 @@ class PairingManager {
 
 
     suspend fun getPairingInfo():
-            PairingInfoResponse {
+            PairingInfoResponse = infoMutex.withLock {
 
         ensureAuthenticated()
 
@@ -174,7 +185,8 @@ class PairingManager {
         )
 
 
-        return response
+        _latestInfo.value = response
+        response
     }
 
 

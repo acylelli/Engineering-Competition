@@ -80,6 +80,8 @@ import com.example.watchsafety.health.HeartRateManager
 import com.example.watchsafety.location.WatchLocation
 import com.example.watchsafety.location.WatchLocationManager
 import com.example.watchsafety.location.WatchTrackingService
+import com.example.watchsafety.location.LocationTrackingMode
+import com.example.watchsafety.location.LocationTrackingState
 import com.example.watchsafety.navigation.TmapRouteClient
 import com.example.watchsafety.navigation.TmapRouteResult
 import com.example.watchsafety.notification.WatchFirebaseMessagingService
@@ -564,6 +566,16 @@ class MainActivity :
 
         setContent {
 
+            LaunchedEffect(currentScreenState.value) {
+                LocationTrackingState.setMode(
+                    when (currentScreenState.value) {
+                        AppScreen.COMPASS -> LocationTrackingMode.NAVIGATION
+                        AppScreen.FALL_DETECTED, AppScreen.SOS_SENT -> LocationTrackingMode.EMERGENCY
+                        else -> LocationTrackingMode.NORMAL
+                    }
+                )
+            }
+
 
             val heartRate by
             heartRateManager
@@ -988,6 +1000,12 @@ class MainActivity :
 
 
                     onPairingCompleted = {
+
+                        if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) {
+                            WatchTrackingService.start(this@MainActivity)
+                        }
 
                         refreshPairingAndStartRealtime()
                     },
@@ -1806,6 +1824,12 @@ class MainActivity :
 
         startHeartRateMeasurement()
 
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            WatchTrackingService.start(this)
+        }
+
         isInForeground =
             true
 
@@ -1938,6 +1962,10 @@ class MainActivity :
         locationManager
             .stop()
 
+        // 안내 화면이 종료되면 일반 주기로 복귀하고, SOS 중에는 빠른 추적을 유지한다.
+        if (LocationTrackingState.mode.value == LocationTrackingMode.NAVIGATION) {
+            LocationTrackingState.setMode(LocationTrackingMode.NORMAL)
+        }
 
         super.onDestroy()
     }
