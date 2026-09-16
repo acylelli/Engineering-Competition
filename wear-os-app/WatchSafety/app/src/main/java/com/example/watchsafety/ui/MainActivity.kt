@@ -2877,6 +2877,12 @@ fun EmergencyManager(
 
                 onBack = { onScreenChange(AppScreen.HOME) },
 
+                onNavigationCancelled = { requestId ->
+                    onReturnHomeRequestHandled(requestId)
+                    onClearReturnHomeRequest()
+                    onScreenChange(AppScreen.HOME)
+                },
+
                 returnHomeRequestId =
                     returnHomeRequestId,
 

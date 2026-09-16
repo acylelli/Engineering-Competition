@@ -3,6 +3,8 @@ package com.example.watchsafety.ui
 import android.hardware.GeomagneticField
 import android.location.Location
 import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.Alignment
@@ -53,6 +56,8 @@ import com.example.watchsafety.navigation.TmapRouteResult
 import com.example.watchsafety.navigation.WatchHeadingManager
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 
 @Composable
@@ -76,12 +81,16 @@ fun TmapRouteTestScreen(
 
     onReturnHomeCompleted: (String) -> Unit,
     onBack: () -> Unit,
+    onNavigationCancelled: (String) -> Unit,
 ) {
 
     var completedRequestId by remember { mutableStateOf<String?>(null) }
 
     val context =
         LocalContext.current
+
+    val exitScope = rememberCoroutineScope()
+    var exitInProgress by remember { mutableStateOf(false) }
 
 
     val routeClient =
@@ -196,6 +205,35 @@ fun TmapRouteTestScreen(
             false
         )
     }
+
+    val handleBack: () -> Unit = {
+        if (!exitInProgress && !completedUpdated) {
+            val requestId = returnHomeRequestId
+            if (requestId == null) {
+                onBack()
+            } else {
+                exitInProgress = true
+                exitScope.launch {
+                    try {
+                        returnHomeRealtimeManager.cancelRequest(
+                            requestId = requestId,
+                            guardianId = requireNotNull(guardianId),
+                            wearerId = requireNotNull(wearerId)
+                        )
+                        onNavigationCancelled(requestId)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        exitInProgress = false
+                        Log.e(RETURN_HOME_TAG, "귀가 안내 취소 실패", error)
+                        Toast.makeText(context, "취소하지 못했습니다. 연결 확인 후 다시 눌러주세요.", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+
+    BackHandler(onBack = handleBack)
 
 
     var statusText by
@@ -997,7 +1035,8 @@ fun TmapRouteTestScreen(
         homeLongitude,
         homeRadiusMeters,
         navigatingUpdated,
-        completedUpdated
+        completedUpdated,
+        exitInProgress
     ) {
 
         /*
@@ -1007,7 +1046,7 @@ fun TmapRouteTestScreen(
          * DB COMPLETED 처리는 request 정보가 있을 때만 수행한다.
          */
         if (
-            completedUpdated
+            completedUpdated || exitInProgress
         ) {
 
             return@LaunchedEffect
@@ -1249,9 +1288,9 @@ fun TmapRouteTestScreen(
                                 0xFF2F5FE3
                             )
                         )
-                        .clickable {
+                        .clickable(enabled = !exitInProgress) {
 
-                            onBack()
+                            handleBack()
                         },
                 contentAlignment =
                     Alignment.Center
@@ -1686,9 +1725,9 @@ fun TmapRouteTestScreen(
                                     0xFF2F5FE3
                                 )
                             )
-                            .clickable {
+                            .clickable(enabled = !exitInProgress) {
 
-                                onBack()
+                                handleBack()
                             },
 
                     contentAlignment =
